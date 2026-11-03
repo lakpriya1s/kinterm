@@ -689,24 +689,6 @@ private struct AgentSoundsMenu: View {
     }
 }
 
-/// The number of running subagents, a pill at the bottom right of the face's
-/// slot. Only shown while the agent works.
-private struct AgentSubagentBadge: View {
-    let count: Int
-
-    var body: some View {
-        Text("\(count)")
-            .font(.system(size: 10, weight: .bold))
-            .foregroundColor(Color(agentHex: 0xd7e7ff))
-            .padding(.horizontal, 4)
-            .frame(minWidth: 18, minHeight: 18)
-            .background(Capsule().fill(Color(agentHex: 0x1c1d21)))
-            .overlay(Capsule().strokeBorder(AgentFaceView.color(for: .working), lineWidth: 1.5))
-            .fixedSize()
-            .accessibilityLabel("\(count) \(count == 1 ? "subagent" : "subagents") running")
-    }
-}
-
 /// Choose the color of an account: one of the named colors, or any color
 /// from the system color panel.
 struct AgentAccountColorMenu: View {
@@ -898,11 +880,10 @@ private struct AgentTabButton: View {
         } label: {
             ZStack {
                 if let status = tab.status, status.state != .clear {
-                    // The subagent badge takes the corner while it shows.
-                    let subagentBadge = status.state == .working && tab.subagents > 0
                     AgentFaceView(
                         state: status.state, size: faceSize, background: background, motion: model.faceMotion,
-                        agents: subagentBadge ? 1 : tab.agents, shells: subagentBadge ? 0 : tab.shells)
+                        agents: tab.agents, shells: tab.shells,
+                        subagents: status.state == .working ? tab.subagents : 0)
                 } else {
                     ShellGlyphView(size: faceSize)
                 }
@@ -914,12 +895,6 @@ private struct AgentTabButton: View {
                 Circle().strokeBorder(
                     settings.accountStyle == .ring ? tab.account?.swiftUIColor ?? .clear : .clear,
                     lineWidth: 2))
-            .overlay(alignment: .bottomTrailing) {
-                if tab.status?.state == .working, tab.subagents > 0 {
-                    AgentSubagentBadge(count: tab.subagents)
-                        .offset(x: 2, y: 2)
-                }
-            }
             .frame(width: button, height: button)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
