@@ -28,15 +28,17 @@ struct AgentFaceView: View {
 
     /// How many agents the face stands for, such as two side by side in
     /// splits, and how many shells they left running in the background,
-    /// such as a dev server. Shown as badges; see `drawBadges`.
+    /// such as a dev server, and how many subagents it's running. Shown as
+    /// badges; see `drawBadges`.
     var agents: Int
     var shells: Int
+    var subagents: Int
 
     @ObservedObject private var settings = AgentTabBarSettings.shared
 
     init(
         state: State, size: CGFloat = 40, background: Color = AgentTabBarColors.bar, motion: Motion = .all,
-        style: Style? = nil, agents: Int = 1, shells: Int = 0
+        style: Style? = nil, agents: Int = 1, shells: Int = 0, subagents: Int = 0
     ) {
         self.state = state
         self.size = size
@@ -45,6 +47,7 @@ struct AgentFaceView: View {
         self.styleOverride = style
         self.agents = agents
         self.shells = shells
+        self.subagents = subagents
     }
 
     private var style: Style { styleOverride ?? settings.faceStyle }
@@ -119,6 +122,7 @@ struct AgentFaceView: View {
         }
         if agents > 1 { parts.append("\(agents) agents") }
         if shells > 0 { parts.append("\(shells) \(shells == 1 ? "shell" : "shells") running") }
+        if subagents > 0 { parts.append("\(subagents) \(subagents == 1 ? "subagent" : "subagents") running") }
         return parts.joined(separator: ", ")
     }
 
@@ -247,23 +251,25 @@ struct AgentFaceView: View {
     static let agentsBadgeColor = Color(agentHex: 0xa8adb7)
     static let shellsBadgeColor = Color(agentHex: 0x5ca0ff)
 
-    /// The badges at the bottom right: how many agents, when more than one,
-    /// in gray, and how many shells, in blue. Alone, each shows its count.
-    /// Together, the agents badge is in front and the shells badge peeks
-    /// out from behind it without its count.
+    static let subagentsBadgeColor = Color(agentHex: 0xb48cff)
+
+    /// The badges at the bottom right: how many subagents are running, in
+    /// purple, how many agents, when more than one, in gray, and how many
+    /// shells, in blue. Alone, a badge shows its count. Together they stack
+    /// in that order: the front badge shows its count and the ones behind
+    /// it peek out to its left without theirs.
     private func drawBadges(in gc: inout GraphicsContext) {
         guard state != .clear else { return }
+        var badges: [(color: Color, count: Int)] = []
+        if subagents > 0 { badges.append((Self.subagentsBadgeColor, subagents)) }
+        if agents > 1 { badges.append((Self.agentsBadgeColor, agents)) }
+        if shells > 0 { badges.append((Self.shellsBadgeColor, shells)) }
         let front = CGRect(x: 27, y: 27, width: 16, height: 16)
-        switch (agents > 1, shells > 0) {
-        case (false, false):
-            break
-        case (false, true):
-            drawBadge(in: &gc, front, color: Self.shellsBadgeColor, count: shells)
-        case (true, false):
-            drawBadge(in: &gc, front, color: Self.agentsBadgeColor, count: agents)
-        case (true, true):
-            drawBadge(in: &gc, front.offsetBy(dx: -6, dy: 0), color: Self.shellsBadgeColor, count: nil)
-            drawBadge(in: &gc, front, color: Self.agentsBadgeColor, count: agents)
+        // Back to front, so each badge is cut out of the ones behind it.
+        for (i, badge) in badges.enumerated().reversed() {
+            drawBadge(
+                in: &gc, front.offsetBy(dx: CGFloat(-6 * i), dy: 0), color: badge.color,
+                count: i == 0 ? badge.count : nil)
         }
     }
 
