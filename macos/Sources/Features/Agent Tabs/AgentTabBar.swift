@@ -689,7 +689,7 @@ private struct AgentSoundsMenu: View {
     }
 }
 
-/// The number of running subagents, a pill at the bottom right of the face's
+/// The number of running subagents, a pill at the bottom left of the face's
 /// slot. Only shown while the agent works.
 private struct AgentSubagentBadge: View {
     let count: Int
@@ -898,11 +898,9 @@ private struct AgentTabButton: View {
         } label: {
             ZStack {
                 if let status = tab.status, status.state != .clear {
-                    // The subagent badge takes the corner while it shows.
-                    let subagentBadge = status.state == .working && tab.subagents > 0
                     AgentFaceView(
                         state: status.state, size: faceSize, background: background, motion: model.faceMotion,
-                        agents: subagentBadge ? 1 : tab.agents, shells: subagentBadge ? 0 : tab.shells)
+                        agents: tab.agents, shells: tab.shells)
                 } else {
                     ShellGlyphView(size: faceSize)
                 }
@@ -914,10 +912,12 @@ private struct AgentTabButton: View {
                 Circle().strokeBorder(
                     settings.accountStyle == .ring ? tab.account?.swiftUIColor ?? .clear : .clear,
                     lineWidth: 2))
-            .overlay(alignment: .bottomTrailing) {
+            .overlay(alignment: .bottomLeading) {
+                // Bottom left, so it shows beside the face's own agents and
+                // shells badges at the bottom right instead of hiding them.
                 if tab.status?.state == .working, tab.subagents > 0 {
                     AgentSubagentBadge(count: tab.subagents)
-                        .offset(x: 2, y: 2)
+                        .offset(x: -2, y: 2)
                 }
             }
             .frame(width: button, height: button)
