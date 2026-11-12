@@ -1,0 +1,783 @@
+import SwiftUI
+
+// The review view, shown beside a terminal or in its own window: what the
+// agent changed, the repository's files, and comments to send back. See
+// scope/designs/08-code-review.md.
+
+struct ReviewView: View {
+    enum Presentation {
+        /// Beside the terminal.
+        case panel
+        /// In its own window.
+        case window
+        /// As a tile in a grid, under the tile's own header.
+        case tile
+    }
+
+    @ObservedObject var model: ReviewModel
+    let presentation: Presentation
+    /// Moves the review between the side panel and its own window. Nil when
+    /// the other place isn't available, as in Grid View.
+    var switchPresentation: (() -> Void)?
+    var close: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ReviewHeader(model: model, presentation: presentation,
+                         switchPresentation: switchPresentation, close: close)
+            Divider().overlay(ReviewColors.border)
+            content
+            Divider().overlay(ReviewColors.border)
+            ReviewFooter(model: model)
+        }
+        .background(ReviewColors.background)
+        .foregroundColor(ReviewColors.text)
+        .environment(\.colorScheme, .dark)
+        .onAppear { model.refresh() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if model.root == nil, !model.loading {
+            ReviewEmpty(
+                symbol: "folder.badge.questionmark",
+                title: "No repository",
+                detail: model.error ?? "Open a terminal in a git repository to review its changes.")
+        } else {
+            let list = Group {
+                switch model.tab {
+                case .changes: ReviewChangesList(model: model)
+                case .files: ReviewFilesList(model: model)
+                }
+            }
+            switch presentation {
+            case .panel:
+                stacked(list)
+            case .window:
+                sideBySide(list)
+            case .tile:
+                // Tiles come in all sizes: side by side when there's room.
+                GeometryReader { geometry in
+                    if geometry.size.width >= 760 {
+                        sideBySide(list)
+                    } else {
+                        stacked(list)
+                    }
+                }
+            }
+        }
+    }
+}
+
+extension ReviewView {
+    private func stacked<List: View>(_ list: List) -> some View {
+        VSplitView {
+            list.frame(minHeight: 90, idealHeight: 200, maxHeight: .infinity)
+            ReviewViewer(model: model).frame(minHeight: 160, maxHeight: .infinity)
+        }
+    }
+
+    private func sideBySide<List: View>(_ list: List) -> some View {
+        HSplitView {
+            list.frame(minWidth: 200, idealWidth: 280, maxWidth: 480)
+            ReviewViewer(model: model).frame(minWidth: 320, maxWidth: .infinity)
+        }
+    }
+}
+
+// MARK: Header
+
+private struct ReviewHeader: View {
+    @ObservedObject var model: ReviewModel
+    let presentation: ReviewView.Presentation
+    let switchPresentation: (() -> Void)?
+    let close: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch")
+                    .foregroundColor(ReviewColors.secondary)
+                Text(model.repoName).font(.system(size: 12, weight: .semibold))
+                if let branch = model.branch {
+                    Text(branch)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(ReviewColors.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 4)
+                if model.loading {
+                    ProgressView().controlSize(.small).scaleEffect(0.7)
+                }
+                ReviewIconButton(symbol: "arrow.clockwise", help: "Refresh") { model.refresh() }
+                if let switchPresentation {
+                    ReviewIconButton(
+                        symbol: presentation == .panel ? "macwindow.on.rectangle" : "sidebar.right",
+                        help: presentation == .panel ? "Open in Its Own Window" : "Show Beside the Terminal",
+                        action: switchPresentation)
+                }
+                switch presentation {
+                case .panel:
+                    ReviewIconButton(symbol: "xmark", help: "Close Review (⌘⇧R)", action: close)
+                case .window, .tile:
+                    EmptyView()
+                }
+            }
+
+            HStack(spacing: 8) {
+                Picker("", selection: $model.tab) {
+                    Text(model.files.isEmpty ? "Changes" : "Changes \(model.files.count)").tag(ReviewModel.Tab.changes)
+                    Text("Files").tag(ReviewModel.Tab.files)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+
+                Spacer(minLength: 4)
+
+                if model.tab == .changes {
+                    Picker("", selection: $model.scope) {
+                        ForEach(ReviewModel.Scope.allCases) { scope in
+                            Text(scope.label).tag(scope)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .help(model.scope.help)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(ReviewColors.surface)
+    }
+}
+
+private struct ReviewIconButton: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 22, height: 22)
+                .foregroundColor(hovering ? ReviewColors.text : ReviewColors.secondary)
+                .background(RoundedRectangle(cornerRadius: 5).fill(hovering ? ReviewColors.hovered : .clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+private struct ReviewEmpty: View {
+    let symbol: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 26))
+                .foregroundColor(ReviewColors.secondary)
+            Text(title).font(.system(size: 13, weight: .semibold))
+            Text(detail)
+                .font(.system(size: 12))
+                .foregroundColor(ReviewColors.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 280)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: Changes tab
+
+private struct ReviewChangesList: View {
+    @ObservedObject var model: ReviewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let error = model.error {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundColor(ReviewColors.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(ReviewColors.card)
+            }
+
+            if model.files.isEmpty {
+                ReviewEmpty(
+                    symbol: "checkmark.circle",
+                    title: model.loading ? "Looking for changes…" : "No changes",
+                    detail: model.loading ? "" : "Nothing has changed in this scope.")
+            } else {
+                summary
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(model.files) { file in
+                                ReviewFileRow(model: model, file: file).id(file.path)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .onChange(of: model.viewer) { viewer in
+                        if case .diff(let path) = viewer { proxy.scrollTo(path) }
+                    }
+                }
+            }
+        }
+    }
+
+    private var summary: some View {
+        let totals = model.totals
+        return HStack(spacing: 8) {
+            Text("\(model.files.count) file\(model.files.count == 1 ? "" : "s")")
+            Text("+\(totals.added)").foregroundColor(ReviewColors.addedText)
+            Text("−\(totals.removed)").foregroundColor(ReviewColors.removedText)
+            Spacer()
+            Text("\(model.viewedCount)/\(model.files.count) viewed")
+                .foregroundColor(ReviewColors.secondary)
+            ProgressView(value: Double(model.viewedCount), total: Double(max(model.files.count, 1)))
+                .frame(width: 50)
+                .tint(ReviewColors.addedText)
+        }
+        .font(.system(size: 11, design: .monospaced))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(ReviewColors.surface.opacity(0.6))
+    }
+}
+
+private struct ReviewFileRow: View {
+    @ObservedObject var model: ReviewModel
+    let file: ReviewFileDiff
+
+    @State private var hovering = false
+
+    private var selected: Bool { model.viewer == .diff(file.path) }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button { model.toggleViewed(file) } label: {
+                Image(systemName: model.isViewed(file) ? "checkmark.square.fill" : "square")
+                    .foregroundColor(model.isViewed(file) ? ReviewColors.addedText : ReviewColors.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(model.isViewed(file) ? "Mark as Not Viewed" : "Mark as Viewed")
+
+            ReviewStatusBadge(status: file.status)
+
+            HStack(spacing: 0) {
+                Text(file.fileName).foregroundColor(model.isViewed(file) ? ReviewColors.secondary : ReviewColors.text)
+                Text(file.directory.isEmpty ? "" : "  " + file.directory)
+                    .foregroundColor(ReviewColors.secondary)
+            }
+            .lineLimit(1)
+            .truncationMode(.head)
+
+            Spacer(minLength: 4)
+
+            if file.binary {
+                Text("bin").foregroundColor(ReviewColors.secondary)
+            } else {
+                Text("+\(file.added)").foregroundColor(ReviewColors.addedText)
+                Text("−\(file.removed)").foregroundColor(ReviewColors.removedText)
+            }
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(selected ? ReviewColors.selected : hovering ? ReviewColors.hovered : .clear)
+                .padding(.horizontal, 4))
+        .contentShape(Rectangle())
+        .onTapGesture { model.viewer = .diff(file.path) }
+        .onHover { hovering = $0 }
+        .help(file.oldPath.map { "\($0) → \(file.path)" } ?? file.path)
+    }
+}
+
+private struct ReviewStatusBadge: View {
+    let status: ReviewFileDiff.Status
+
+    var body: some View {
+        Text(status.rawValue)
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            .foregroundColor(ReviewColors.status(status))
+            .frame(width: 16, height: 16)
+            .background(RoundedRectangle(cornerRadius: 3).fill(ReviewColors.status(status).opacity(0.15)))
+    }
+}
+
+// MARK: Files tab
+
+private struct ReviewFilesList: View {
+    @ObservedObject var model: ReviewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundColor(ReviewColors.secondary)
+                TextField("Find a file", text: $model.fileQuery)
+                    .textFieldStyle(.plain)
+                if !model.fileQuery.isEmpty {
+                    Button { model.fileQuery = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundColor(ReviewColors.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .font(.system(size: 12))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(ReviewColors.card)
+
+            if model.fileQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                if model.tree.isEmpty {
+                    ReviewEmpty(symbol: "folder", title: "Loading files…", detail: "")
+                } else {
+                    // List is backed by an outline view, so only the rows on
+                    // screen are built, even for very large repositories.
+                    List(model.tree, children: \.children) { node in
+                        ReviewTreeRow(model: model, node: node)
+                    }
+                    .listStyle(.sidebar)
+                    .scrollContentBackground(.hidden)
+                }
+            } else {
+                List(model.filteredFiles, id: \.self) { path in
+                    ReviewTreeRow(model: model, node: ReviewTreeNode(id: path, name: path, children: nil))
+                }
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+            }
+        }
+    }
+}
+
+private struct ReviewTreeRow: View {
+    @ObservedObject var model: ReviewModel
+    let node: ReviewTreeNode
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: node.isFolder ? "folder.fill" : "doc.text")
+                .font(.system(size: 11))
+                .foregroundColor(node.isFolder ? ReviewColors.accent.opacity(0.8) : ReviewColors.secondary)
+            Text(node.name)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundColor(isOpen ? ReviewColors.accent : ReviewColors.text)
+            Spacer(minLength: 2)
+            if let status = status {
+                ReviewStatusBadge(status: status)
+            } else if node.isFolder, containsChanges {
+                Circle().fill(ReviewColors.status(.modified)).frame(width: 5, height: 5)
+            }
+        }
+        .font(.system(size: 12))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !node.isFolder else { return }
+            model.viewer = .file(node.id)
+        }
+    }
+
+    private var isOpen: Bool { model.viewer == .file(node.id) }
+
+    private var status: ReviewFileDiff.Status? {
+        node.isFolder ? nil : model.statusByPath[node.id]
+    }
+
+    private var containsChanges: Bool {
+        model.statusByPath.keys.contains { $0.hasPrefix(node.id) }
+    }
+}
+
+// MARK: Viewer
+
+private struct ReviewViewer: View {
+    @ObservedObject var model: ReviewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            switch model.viewer {
+            case .none:
+                ReviewEmpty(
+                    symbol: "doc.text.magnifyingglass",
+                    title: model.tab == .changes ? "Pick a file" : "Pick a file to read",
+                    detail: "Hover a line and click + to leave a comment for the agent.")
+
+            case .diff(let path):
+                if let file = model.file(at: path) {
+                    ReviewDiffHeader(model: model, file: file)
+                    content(path: path)
+                } else {
+                    ReviewEmpty(symbol: "checkmark.circle", title: "No longer changed", detail: path)
+                }
+
+            case .file(let path):
+                ReviewFileHeader(model: model, path: path)
+                content(path: path)
+            }
+        }
+        .background(ReviewColors.background)
+    }
+
+    @ViewBuilder
+    private func content(path: String) -> some View {
+        if let note = model.viewerNote, model.rows.isEmpty {
+            ReviewEmpty(symbol: "doc", title: note, detail: "")
+        } else {
+            VStack(spacing: 0) {
+                if let note = model.viewerNote {
+                    Text(note)
+                        .font(.system(size: 11))
+                        .foregroundColor(ReviewColors.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(6)
+                        .background(ReviewColors.card)
+                }
+                ReviewCodeView(model: model, path: path)
+            }
+        }
+    }
+}
+
+private struct ReviewDiffHeader: View {
+    @ObservedObject var model: ReviewModel
+    let file: ReviewFileDiff
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ReviewStatusBadge(status: file.status)
+            Text(file.oldPath.map { "\($0) → \(file.path)" } ?? file.path)
+                .font(.system(size: 12, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.head)
+                .textSelection(.enabled)
+            Spacer(minLength: 4)
+            ReviewIconButton(symbol: "doc.text", help: "Open the Whole File") {
+                model.tab = .files
+                model.viewer = .file(file.path)
+            }
+            .disabled(file.status == .deleted)
+            ReviewIconButton(symbol: "arrow.uturn.backward", help: "Revert This File…") { confirmRevert() }
+            Toggle("Viewed", isOn: Binding(
+                get: { model.isViewed(file) },
+                set: { _ in model.toggleViewed(file) }))
+                .toggleStyle(.checkbox)
+                .font(.system(size: 11))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(ReviewColors.surface)
+    }
+
+    private func confirmRevert() {
+        let alert = NSAlert()
+        alert.messageText = "Revert \(file.fileName)?"
+        alert.informativeText = file.status == .added || file.untracked
+            ? "This new file will be moved to the Trash."
+            : "Your working copy of this file goes back to how it was before these changes. This can't be undone."
+        alert.addButton(withTitle: "Revert")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        if alert.runModal() == .alertFirstButtonReturn { model.revert(file) }
+    }
+}
+
+private struct ReviewFileHeader: View {
+    @ObservedObject var model: ReviewModel
+    let path: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "doc.text").foregroundColor(ReviewColors.secondary)
+            Text(path)
+                .font(.system(size: 12, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.head)
+                .textSelection(.enabled)
+            Spacer(minLength: 4)
+            if model.statusByPath[path] != nil {
+                Button("Show Changes") {
+                    model.scope = .uncommitted
+                    model.tab = .changes
+                    model.viewer = .diff(path)
+                }
+                .controlSize(.small)
+            }
+            if let root = model.root {
+                ReviewIconButton(symbol: "arrow.up.forward.app", help: "Open in Default App") {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: root).appendingPathComponent(path))
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(ReviewColors.surface)
+    }
+}
+
+/// The lines of a diff or file. A lazy stack, so only lines on screen are
+/// laid out; long lines wrap rather than scroll sideways.
+private struct ReviewCodeView: View {
+    @ObservedObject var model: ReviewModel
+    let path: String
+
+    var body: some View {
+        let digits = max(3, String(maxLineNumber).count)
+        let gutter = CGFloat(digits) * 7.5 + 10
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(model.rows) { row in
+                    ReviewLineView(model: model, path: path, row: row, gutter: gutter)
+                }
+            }
+            .padding(.bottom, 24)
+        }
+        .id(path)
+    }
+
+    private var maxLineNumber: Int {
+        guard let last = model.rows.last else { return 0 }
+        switch last.kind {
+        case .plain(let n): return n
+        case .line(let line): return max(line.old ?? 0, line.new ?? 0)
+        case .hunk: return 0
+        }
+    }
+}
+
+private struct ReviewLineView: View {
+    @ObservedObject var model: ReviewModel
+    let path: String
+    let row: ReviewRow
+    let gutter: CGFloat
+
+    @State private var hovering = false
+
+    private static let font = Font.system(size: 12, design: .monospaced)
+
+    var body: some View {
+        switch row.kind {
+        case .hunk(let hunk):
+            HStack(spacing: 8) {
+                Text(hunk.header)
+                    .font(Self.font)
+                    .foregroundColor(ReviewColors.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 4)
+                if hovering, case .diff = model.viewer, let file = model.file(at: path) {
+                    Button("Revert Change") { model.revert(hunk, of: file) }
+                        .controlSize(.mini)
+                        .help("Undo just this part of the file")
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(minHeight: 24)
+            .background(ReviewColors.hunkLine)
+            .onHover { hovering = $0 }
+
+        case .line(let line):
+            let number = line.new ?? line.old ?? 0
+            let removed = line.new == nil
+            lineBody(
+                old: line.old, new: line.new,
+                marker: line.kind == .added ? "+" : line.kind == .removed ? "-" : " ",
+                background: line.kind == .added ? ReviewColors.addedLine
+                    : line.kind == .removed ? ReviewColors.removedLine : .clear,
+                gutterBackground: line.kind == .added ? ReviewColors.addedGutter
+                    : line.kind == .removed ? ReviewColors.removedGutter : .clear,
+                onComment: line.kind == .noNewline ? nil : { model.startComment(on: line, path: path) })
+            extras(line: number, removed: removed)
+
+        case .plain(let n):
+            lineBody(
+                old: nil, new: n, marker: nil, background: .clear, gutterBackground: .clear,
+                onComment: { model.startComment(onFileLine: n, text: String(row.text.characters), path: path) })
+            extras(line: n, removed: false)
+        }
+    }
+
+    private func lineBody(old: Int?, new: Int?, marker: String?, background: Color, gutterBackground: Color,
+                          onComment: (() -> Void)?) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            ZStack(alignment: .leading) {
+                HStack(spacing: 0) {
+                    if marker != nil {
+                        number(old)
+                    }
+                    number(new)
+                }
+                if hovering, let onComment {
+                    Button(action: onComment) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 16, height: 16)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(ReviewColors.accent))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Comment on this line")
+                    .padding(.leading, 2)
+                }
+            }
+            .background(gutterBackground)
+
+            if let marker {
+                Text(marker)
+                    .font(Self.font)
+                    .foregroundColor(ReviewColors.secondary)
+                    .frame(width: 14)
+            } else {
+                Spacer().frame(width: 8)
+            }
+
+            Text(row.text)
+                .font(Self.font)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.trailing, 8)
+        }
+        .padding(.vertical, 1)
+        .background(background)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+    }
+
+    private func number(_ n: Int?) -> some View {
+        Text(n.map(String.init) ?? "")
+            .font(Self.font)
+            .foregroundColor(ReviewColors.secondary.opacity(0.8))
+            .frame(width: gutter, alignment: .trailing)
+            .padding(.trailing, 4)
+    }
+
+    /// Comments on this line, and the box for writing one.
+    @ViewBuilder
+    private func extras(line: Int, removed: Bool) -> some View {
+        let comments = model.comments(at: path, line: line, removed: removed)
+        if !comments.isEmpty || model.composing.map({ $0.path == path && $0.line == line && $0.removed == removed }) == true {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(comments) { comment in
+                    ReviewCommentCard(comment: comment) { model.delete(comment) }
+                }
+                if let target = model.composing, target.path == path, target.line == line, target.removed == removed {
+                    ReviewCommentComposer(model: model)
+                }
+            }
+            .padding(.vertical, 6)
+            .padding(.leading, gutter + 12)
+            .padding(.trailing, 10)
+            .background(ReviewColors.surface)
+        }
+    }
+}
+
+private struct ReviewCommentCard: View {
+    let comment: ReviewComment
+    let delete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "text.bubble.fill")
+                .foregroundColor(ReviewColors.accent)
+            Text(comment.text)
+                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+            Button(action: delete) {
+                Image(systemName: "trash").foregroundColor(ReviewColors.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Delete Comment")
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(ReviewColors.card))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(ReviewColors.border))
+    }
+}
+
+private struct ReviewCommentComposer: View {
+    @ObservedObject var model: ReviewModel
+
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            TextField("Tell the agent what to change here…", text: $text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .lineLimit(2...8)
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 6).fill(ReviewColors.card))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(ReviewColors.accent.opacity(0.7)))
+                .focused($focused)
+                .onSubmit { model.saveComment(text) }
+                .onExitCommand { model.composing = nil }
+            HStack(spacing: 6) {
+                Text("↵ add · ⌥↵ new line · esc cancel")
+                    .font(.system(size: 10))
+                    .foregroundColor(ReviewColors.secondary)
+                Spacer()
+                Button("Cancel") { model.composing = nil }
+                    .controlSize(.small)
+                Button("Add Comment") { model.saveComment(text) }
+                    .controlSize(.small)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .onAppear { focused = true }
+    }
+}
+
+// MARK: Footer
+
+private struct ReviewFooter: View {
+    @ObservedObject var model: ReviewModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TextField("Note for the agent (optional)", text: $model.note, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .lineLimit(1...4)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 6).fill(ReviewColors.card))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(ReviewColors.border))
+
+            Button {
+                model.sendToAgent()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "paperplane.fill")
+                    Text(model.comments.isEmpty ? "Send" : "Send \(model.comments.count)")
+                }
+            }
+            .controlSize(.regular)
+            .disabled(!model.canSend)
+            .help("Type the comments into the agent's prompt. Read them over, then press Return there.")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(ReviewColors.surface)
+    }
+}

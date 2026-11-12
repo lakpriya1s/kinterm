@@ -1756,6 +1756,9 @@ extension BaseTerminalController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 guard let self else { return }
+                // A prompt starting: remember the tree for the review's
+                // "Last Turn" and "This Session".
+                ReviewSnapshots.shared.statusChanged(self, from: programStatus?.state, to: status?.state)
                 programStatus = status
                 (window as? TerminalWindow)?.programStatus = status
                 AgentTabBarModel.setNeedsRefresh()
