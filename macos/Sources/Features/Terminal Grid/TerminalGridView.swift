@@ -17,18 +17,25 @@ struct TerminalGridView: View {
     /// Whether the grid has a review tile (⌘⇧R). See `ReviewCenter`.
     @ObservedObject private var review = ReviewCenter.shared
 
+    /// Whether the grid has a browser tile (⌘⇧B). See `BrowserCenter`.
+    @ObservedObject private var browsers = BrowserCenter.shared
+
     private static let gap: CGFloat = 6
 
-    /// A tile: a tab, or the review of one.
+    /// A tile: a tab, the review of one, or the browser.
     private enum Item: Hashable {
         case tab(BaseTerminalController)
         case review
+        case browser
+        case devTools
     }
 
     var body: some View {
         let window = controllers.first?.window
         let reviewed = review.gridReviewController(for: window)
-        let items = controllers.map(Item.tab) + (reviewed == nil ? [] : [.review])
+        let browser = browsers.gridPage(for: window)
+        let items = controllers.map(Item.tab) + (reviewed == nil ? [] : [.review]) + (browser == nil ? [] : [.browser])
+            + (browser?.devTools == .docked ? [.devTools] : [])
         let count = items.count
         // As square as possible, wider than tall: 2 → 2×1, 3–4 → 2×2,
         // 5–6 → 3×2, 7–9 → 3×3.
@@ -51,6 +58,14 @@ struct TerminalGridView: View {
                                     model: review.model(for: reviewed),
                                     tab: tab(for: reviewed),
                                     window: window)
+                            }
+                        case .browser:
+                            if let browser, let window {
+                                BrowserGridTile(page: browser, window: window)
+                            }
+                        case .devTools:
+                            if let browser {
+                                DevToolsGridTile(page: browser)
                             }
                         }
                     }
@@ -177,6 +192,104 @@ private struct ReviewGridTile: View {
                 .allowsHitTesting(false))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Review")
+    }
+}
+
+/// The browser tile (⌘⇧B). See `BrowserCenter`.
+private struct BrowserGridTile: View {
+    @ObservedObject var page: BrowserPage
+    let window: NSWindow
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "globe")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(AgentTabBarColors.cardTitle)
+                Text("Browser")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(AgentTabBarColors.cardTitle)
+                Text(page.displayTitle)
+                    .font(.system(size: 11))
+                    .foregroundColor(AgentTabBarColors.cardMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 4)
+
+                Text("⌘⇧B")
+                    .font(.system(size: 10))
+                    .foregroundColor(AgentTabBarColors.cardMuted)
+                TerminalGridHeaderButton(symbol: "macwindow.on.rectangle", help: "Open Browser in Its Own Window") {
+                    BrowserCenter.shared.popOut(page)
+                }
+                TerminalGridHeaderButton(symbol: "xmark", help: "Close Browser (⌘⇧B)") {
+                    BrowserCenter.shared.closeGridTile(in: window)
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(AgentTabBarColors.card)
+
+            BrowserView(page: page, placement: .tile, close: {
+                BrowserCenter.shared.closeGridTile(in: window)
+            })
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(AgentTabBarColors.border, lineWidth: 1)
+                .allowsHitTesting(false))
+        .onDisappear { BrowserCenter.shared.gridTileDisappeared(page) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Browser")
+    }
+}
+
+/// The browser tile's DevTools, a tile of their own. See `BrowserCenter`.
+private struct DevToolsGridTile: View {
+    @ObservedObject var page: BrowserPage
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "hammer.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(AgentTabBarColors.cardTitle)
+                Text("DevTools")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(AgentTabBarColors.cardTitle)
+                Text(page.displayTitle)
+                    .font(.system(size: 11))
+                    .foregroundColor(AgentTabBarColors.cardMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 4)
+
+                Text("⌥⌘I")
+                    .font(.system(size: 10))
+                    .foregroundColor(AgentTabBarColors.cardMuted)
+                TerminalGridHeaderButton(symbol: "macwindow.on.rectangle", help: "Open DevTools in Their Own Window") {
+                    page.showDevTools(docked: false)
+                }
+                TerminalGridHeaderButton(symbol: "xmark", help: "Close DevTools (⌥⌘I)") {
+                    page.closeDevTools()
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(AgentTabBarColors.card)
+
+            BrowserDevTools(page: page, showsHeader: false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(AgentTabBarColors.border, lineWidth: 1)
+                .allowsHitTesting(false))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("DevTools")
     }
 }
 

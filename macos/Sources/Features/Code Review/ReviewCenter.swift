@@ -307,7 +307,7 @@ struct ReviewPanelHost<Content: View>: View {
         HStack(spacing: 0) {
             content()
             if let controller, center.isPanelShown(for: controller) {
-                ReviewResizeHandle(width: $center.panelWidth)
+                PanelResizeHandle(width: $center.panelWidth)
                 ReviewView(
                     model: center.model(for: controller),
                     presentation: .panel,
@@ -326,8 +326,9 @@ struct ReviewPanelHost<Content: View>: View {
     }
 }
 
-/// The edge between the terminal and the panel: drag to resize.
-private struct ReviewResizeHandle: View {
+/// The edge between the terminal and a side panel (review, browser): drag
+/// to resize.
+struct PanelResizeHandle: View {
     @Binding var width: CGFloat
 
     @State private var start: CGFloat?
