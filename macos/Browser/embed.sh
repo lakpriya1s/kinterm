@@ -23,6 +23,10 @@ mkdir -p "$app/Contents/Resources/browser"
 cp "$here/bin/kinterm-browser-mcp.mjs" "$app/Contents/Resources/browser/"
 sign "$app/Contents/MacOS/kinterm-browser"
 
+# The KinTerm skill for agents, installed by the Setup Assistant.
+mkdir -p "$app/Contents/Resources/agents/skills/kinterm"
+cp "$SRCROOT/../agents/skills/kinterm/SKILL.md" "$app/Contents/Resources/agents/skills/kinterm/"
+
 if [ ! -f "$built/KinTermBrowser.dylib" ]; then
   echo "note: No browser built (run macos/Browser/build.sh to include it)."
   rm -rf "$frameworks/Chromium Embedded Framework.framework" "$frameworks"/KinTerm\ Helper*.app \

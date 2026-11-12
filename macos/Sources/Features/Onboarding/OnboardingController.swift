@@ -2,13 +2,23 @@ import Cocoa
 import SwiftUI
 
 /// The Setup Assistant: a wizard for KinTerm's own options (faces, the tab
-/// bar, the Claude Code hook, notifications and the summaries), shown on
-/// first launch and from KinTerm › Setup Assistant… after that. Choices apply
+/// bar, the Claude Code hook, notifications and the summaries) and its
+/// tools (Grid View, Code Review, the browser), shown on first launch and
+/// from KinTerm › Setup Assistant… after that. After an update with new
+/// tools, people who finished it see just those, once ("What's New"). Choices apply
 /// as they're made, so the windows behind it show them right away.
 final class OnboardingController: NSWindowController, NSWindowDelegate {
     static let shared = OnboardingController()
 
     private static let completedKey = "OnboardingCompleted"
+
+    /// The newest pages seen, so people who finished the wizard before a
+    /// page existed see it once, alone, as "What's New". Bump with a new
+    /// page and list it in `OnboardingView.Mode.whatsNew`.
+    private static let featuresKey = "OnboardingFeaturesSeen"
+    private static let features = 1
+
+    private var mode: OnboardingView.Mode = .setup
 
     private init() {
         let window = NSWindow(
@@ -24,7 +34,11 @@ final class OnboardingController: NSWindowController, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
-        window.contentView = NSHostingView(rootView: OnboardingView(finish: { [weak self] in self?.finish() }))
+        window.contentView = view(.setup)
+    }
+
+    private func view(_ mode: OnboardingView.Mode) -> NSView {
+        NSHostingView(rootView: OnboardingView(mode: mode, finish: { [weak self] in self?.finish() }))
     }
 
     @available(*, unavailable)
@@ -36,19 +50,34 @@ final class OnboardingController: NSWindowController, NSWindowDelegate {
     /// hasn't been finished yet.
     func start() {
         installMenuItem()
-        var force = false
+        var force = false, forceNew = false
         #if DEBUG
         force = ProcessInfo.processInfo.environment["KINTERM_ONBOARDING_STEP"] != nil
+        forceNew = ProcessInfo.processInfo.environment["KINTERM_WHATS_NEW"] != nil
         #endif
-        guard force || !UserDefaults.ghostty.bool(forKey: Self.completedKey) else { return }
+        let defaults = UserDefaults.ghostty
+        let mode: OnboardingView.Mode
+        if force || !defaults.bool(forKey: Self.completedKey) {
+            mode = .setup
+        } else if forceNew || defaults.integer(forKey: Self.featuresKey) < Self.features {
+            mode = .whatsNew
+        } else {
+            return
+        }
         // After the first terminal window is up, so the wizard sits on top.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.show() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.present(mode) }
     }
 
+    /// The whole wizard, from KinTerm › Setup Assistant….
     @objc func show() {
+        present(.setup)
+    }
+
+    private func present(_ mode: OnboardingView.Mode) {
         guard let window else { return }
-        if !window.isVisible {
-            window.contentView = NSHostingView(rootView: OnboardingView(finish: { [weak self] in self?.finish() }))
+        if !window.isVisible || mode != self.mode {
+            self.mode = mode
+            window.contentView = view(mode)
             window.center()
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -63,6 +92,7 @@ final class OnboardingController: NSWindowController, NSWindowDelegate {
         // Closing early counts too: everything has a working default, and
         // the wizard is always in the KinTerm menu.
         UserDefaults.ghostty.set(true, forKey: Self.completedKey)
+        UserDefaults.ghostty.set(Self.features, forKey: Self.featuresKey)
     }
 
     private func installMenuItem() {

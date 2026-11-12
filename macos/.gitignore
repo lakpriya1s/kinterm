@@ -4,3 +4,4 @@ build/
 xcuserdata/
 DerivedData/
 Browser/.cef/
+*.profraw

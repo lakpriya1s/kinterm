@@ -1,10 +1,15 @@
 import AppKit
 
-/// Lets agents use KinTerm's browser: copies `kinterm-browser` to
-/// `~/.config/kinterm/browser/` (a path that stays put when KinTerm moves)
-/// and adds it as an MCP server to Claude Code, for each account, and to
-/// Codex, with their own `mcp add` commands. Only when you ask (Browser
-/// Options › Let Agents Use the Browser…).
+/// Connects agents to KinTerm's tools, only when you ask (the Setup
+/// Assistant's Connect Agents, or Browser Options › Let Agents Use the
+/// Browser…):
+/// - the KinTerm skill (agents/skills/kinterm/SKILL.md), into each Claude
+///   Code account's `skills/kinterm/`, which tells agents about the browser
+///   and Review Changes;
+/// - the browser's MCP server: `kinterm-browser` is copied to
+///   `~/.config/kinterm/browser/` (a path that stays put when KinTerm moves)
+///   and added to Claude Code, for each account, and to Codex, with their
+///   own `mcp add` commands.
 enum BrowserAgentInstaller {
     static let serverName = "kinterm-browser"
 
@@ -29,12 +34,44 @@ enum BrowserAgentInstaller {
         return candidates.compactMap { $0 }.first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
-    /// After an update, refresh a copy that's already installed.
+    /// After an update, refresh copies that are already installed: the CLI
+    /// and the skill.
+    @MainActor
     static func updateInstalledCLI() {
+        let folders = claudeFolders
         DispatchQueue.global(qos: .utility).async {
-            guard FileManager.default.fileExists(atPath: cliURL.path) else { return }
-            try? installCLI()
+            if FileManager.default.fileExists(atPath: cliURL.path) { try? installCLI() }
+            for folder in folders where isSkillInstalled(in: folder) { try? installSkill(into: folder) }
         }
+    }
+
+    // MARK: The skill
+
+    private static var bundledSkill: URL? {
+        Bundle.main.resourceURL?.appendingPathComponent("agents/skills/kinterm/SKILL.md")
+    }
+
+    private static func skillURL(in folder: URL) -> URL {
+        folder.appendingPathComponent("skills/kinterm/SKILL.md")
+    }
+
+    static func isSkillInstalled(in folder: URL) -> Bool {
+        FileManager.default.fileExists(atPath: skillURL(in: folder).path)
+    }
+
+    private static func installSkill(into folder: URL) throws {
+        guard let bundled = bundledSkill, let data = try? Data(contentsOf: bundled) else {
+            throw InstallError.skillMissing
+        }
+        let target = skillURL(in: folder)
+        if (try? Data(contentsOf: target)) == data { return }
+        try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: target, options: .atomic)
+    }
+
+    enum InstallError: LocalizedError {
+        case skillMissing
+        var errorDescription: String? { "This copy of KinTerm doesn't include the KinTerm skill." }
     }
 
     private static func installCLI() throws {
@@ -52,7 +89,7 @@ enum BrowserAgentInstaller {
 
     /// Claude Code config folders: ~/.claude and each account's.
     @MainActor
-    private static var claudeFolders: [URL] {
+    static var claudeFolders: [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         var ids = [".claude"]
         for account in AgentAccountStore.shared.accounts where !ids.contains(account.id) {
@@ -70,6 +107,7 @@ enum BrowserAgentInstaller {
         let folders = claudeFolders
         let alert = NSAlert()
         alert.messageText = "Let agents use KinTerm's browser?"
+        // The skill comes along: it's what tells agents the browser is there.
         let accounts = folders.map { ($0.path as NSString).abbreviatingWithTildeInPath }.joined(separator: ", ")
         alert.informativeText = """
             Adds a "\(serverName)" MCP server to Claude Code (\(accounts.isEmpty ? "no config folder yet" : accounts)) \
@@ -83,33 +121,51 @@ enum BrowserAgentInstaller {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            let report = connect(claudeFolders: folders)
-            DispatchQueue.main.async {
+        connect(claudeFolders: folders) { report in
                 let done = NSAlert()
                 done.messageText = report.allSatisfy(\.ok) ? "Agents can use the browser" : "Some agents weren't set up"
                 done.informativeText = report.map { "\($0.ok ? "✓" : "✗") \($0.name): \($0.detail)" }
                     .joined(separator: "\n")
                 done.runModal()
-            }
         }
     }
 
-    private struct Outcome {
+    /// Install everything, off the main thread, then report on the main
+    /// thread.
+    static func connect(claudeFolders: [URL], completion: @escaping ([Outcome]) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let report = connect(claudeFolders: claudeFolders)
+            DispatchQueue.main.async { completion(report) }
+        }
+    }
+
+    struct Outcome {
         let name: String
         let ok: Bool
         let detail: String
     }
 
     private static func connect(claudeFolders: [URL]) -> [Outcome] {
+        var outcomes: [Outcome] = []
+        for folder in claudeFolders {
+            let name = "KinTerm skill (\((folder.path as NSString).abbreviatingWithTildeInPath))"
+            do {
+                try installSkill(into: folder)
+                outcomes.append(Outcome(name: name, ok: true, detail: "installed"))
+            } catch {
+                outcomes.append(Outcome(name: name, ok: false, detail: error.localizedDescription))
+            }
+        }
+
+        // The browser's tools, if this KinTerm has the browser.
+        guard BrowserEngine.isInstalled else { return outcomes }
         do {
             try installCLI()
         } catch {
-            return [Outcome(name: "kinterm-browser", ok: false, detail: error.localizedDescription)]
+            return outcomes + [Outcome(name: "kinterm-browser", ok: false, detail: error.localizedDescription)]
         }
         let cli = shellQuote(cliURL.path)
         let socket = shellQuote("KINTERM_BROWSER_SOCKET=\(BrowserControlServer.socketPath)")
-        var outcomes: [Outcome] = []
 
         let haveClaude = shell("command -v claude").status == 0
         if haveClaude {
