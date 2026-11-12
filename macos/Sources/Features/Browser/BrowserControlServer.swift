@@ -24,7 +24,8 @@ final class BrowserControlServer {
     private var source: DispatchSourceRead?
     private let queue = DispatchQueue(label: "com.kinterm.browser-control")
 
-    /// Where the socket is. Terminals get it as KINTERM_BROWSER_SOCKET.
+    /// Where the socket is. Terminals get it as KINTERM_SOCKET and
+    /// KINTERM_BROWSER_SOCKET.
     static var socketPath: String {
         let preferred = BrowserEngine.profileURL.deletingLastPathComponent().appendingPathComponent("browser.sock").path
         // Unix socket paths are limited to 104 bytes.
@@ -36,6 +37,10 @@ final class BrowserControlServer {
         guard listener < 0 else { return }
         let path = Self.socketPath
         setenv("KINTERM_BROWSER_SOCKET", path, 1)
+        // The same, under a name agent configs never set: tools prefer it,
+        // so an agent always reaches the KinTerm it runs in, even when its
+        // MCP config names another (a release build's, from setup).
+        setenv("KINTERM_SOCKET", path, 1)
 
         try? FileManager.default.createDirectory(
             atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)

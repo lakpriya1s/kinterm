@@ -23,7 +23,10 @@ import net from "node:net";
 import readline from "node:readline";
 
 const CHROME_DEVTOOLS_MCP = "chrome-devtools-mcp@1.13.0";
-const socketPath = process.env.KINTERM_BROWSER_SOCKET;
+// The KinTerm this agent runs in (KINTERM_SOCKET, from its terminal)
+// first: KINTERM_BROWSER_SOCKET may be fixed in the agent's MCP config to
+// whichever KinTerm set it up.
+const socketPath = process.env.KINTERM_SOCKET || process.env.KINTERM_BROWSER_SOCKET;
 const surface = process.env.KINTERM_SURFACE_ID || undefined;
 
 /** Ask KinTerm something over its socket, as this agent's terminal. */

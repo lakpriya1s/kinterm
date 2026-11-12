@@ -15,6 +15,10 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 
+# The KinTerm this runs in first (see kinterm-browser-mcp.mjs).
+if [ -n "${KINTERM_SOCKET:-}" ]; then
+  KINTERM_BROWSER_SOCKET=$KINTERM_SOCKET
+fi
 if [ -z "${KINTERM_BROWSER_SOCKET:-}" ]; then
   id=com.kinterm.app
   # Run from inside an app bundle: that KinTerm's socket.

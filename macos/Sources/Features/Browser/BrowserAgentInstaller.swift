@@ -202,8 +202,9 @@ enum BrowserAgentInstaller {
     /// Codex gives MCP servers only the environment it's told to, unlike
     /// Claude Code, which passes its own on. Without KINTERM_SURFACE_ID the
     /// browser can't tell which tab a Codex agent is in, so it would get
-    /// the tab in front, and every tab's page.
-    private static let codexForwardedVariables = ["KINTERM_SURFACE_ID"]
+    /// the tab in front, and every tab's page; without KINTERM_SOCKET, an
+    /// agent in another KinTerm (a debug build) would reach this one.
+    private static let codexForwardedVariables = ["KINTERM_SURFACE_ID", "KINTERM_SOCKET"]
 
     private static var codexConfigURL: URL {
         let home = ProcessInfo.processInfo.environment["CODEX_HOME"].flatMap { $0.isEmpty ? nil : $0 }
@@ -212,19 +213,25 @@ enum BrowserAgentInstaller {
         return home.appendingPathComponent("config.toml")
     }
 
-    /// Where the server's table is in Codex's config, and whether it
-    /// already forwards the variables.
-    private static func codexServerTable(in lines: [String]) -> (header: Int, forwards: Bool)? {
+    private static var codexEnvVarsLine: String {
+        "env_vars = [" + codexForwardedVariables.map { "\"\($0)\"" }.joined(separator: ", ") + "]"
+    }
+
+    /// Where the server's table is in Codex's config, its `env_vars` line
+    /// if it has one, and whether that forwards everything needed.
+    private static func codexServerTable(in lines: [String]) -> (header: Int, envVars: Int?, forwards: Bool)? {
         let headers = ["[mcp_servers.\(serverName)]", "[mcp_servers.\"\(serverName)\"]"]
         guard let header = lines.firstIndex(where: { headers.contains($0.trimmingCharacters(in: .whitespaces)) })
         else { return nil }
-        var forwards = false
-        for line in lines[(header + 1)...] {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+        for index in (header + 1)..<lines.count {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("[") { break }
-            if trimmed.hasPrefix("env_vars") { forwards = true }
+            if trimmed.hasPrefix("env_vars") {
+                let forwards = codexForwardedVariables.allSatisfy { trimmed.contains("\"\($0)\"") }
+                return (header, index, forwards)
+            }
         }
-        return (header, forwards)
+        return (header, nil, false)
     }
 
     /// Whether Codex has the browser's MCP server but doesn't forward the
@@ -235,8 +242,8 @@ enum BrowserAgentInstaller {
         return !table.forwards
     }
 
-    /// Have Codex pass KINTERM_SURFACE_ID on to the browser's MCP server
-    /// (its `env_vars`). If this Codex doesn't understand that, its config
+    /// Have Codex pass KINTERM_SURFACE_ID and KINTERM_SOCKET on to the
+    /// browser's MCP server (its `env_vars`). If this Codex doesn't understand that, its config
     /// is put back as it was. Returns whether Codex now forwards it.
     @discardableResult
     static func forwardSurfaceToCodex() -> Bool {
@@ -245,8 +252,13 @@ enum BrowserAgentInstaller {
         var lines = original.components(separatedBy: "\n")
         guard let table = codexServerTable(in: lines) else { return false }
         if table.forwards { return true }
-        let names = codexForwardedVariables.map { "\"\($0)\"" }.joined(separator: ", ")
-        lines.insert("env_vars = [\(names)]", at: table.header + 1)
+        if let existing = table.envVars {
+            // Ours, from an earlier KinTerm, short of a variable.
+            guard lines[existing].contains("KINTERM_") else { return false }
+            lines[existing] = codexEnvVarsLine
+        } else {
+            lines.insert(codexEnvVarsLine, at: table.header + 1)
+        }
         do {
             try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
         } catch {
