@@ -63,7 +63,25 @@ internals keep their names so upstream merges still work:
   no repo or `jq` is needed), account colors, notifications, dock badge and
   menu bar summary. KinTerm › Setup Assistant… reopens it; `OnboardingCompleted`
   in defaults marks it done. Debug builds open a page directly with
-  `KINTERM_ONBOARDING_STEP=<welcome|faces|tabBar|claude|stayInLoop|done>`.
+  `KINTERM_ONBOARDING_STEP=<welcome|faces|tabBar|claude|tools|stayInLoop|done>`.
+  The `tools` page shows Grid View, Review Changes and the browser, and its
+  Connect Agents button installs the KinTerm skill
+  (`agents/skills/kinterm/SKILL.md`, into each account's `skills/`) and the
+  browser's MCP server (`BrowserAgentInstaller`). People who finished the
+  wizard before see that page alone, once, as "New in KinTerm"
+  (`OnboardingFeaturesSeen`; bump `OnboardingController.features` for the
+  next one; `KINTERM_WHATS_NEW=1` forces it in debug builds).
+- Grid View (`Features/Terminal Grid/`, ⌘⇧E): every tab of a window as a
+  live tile.
+- Code Review (`Features/Code Review/`, ⌘⇧R): diffs of the focused tab's
+  repository beside the terminal, in a window, or as a grid tile. Design:
+  [designs/08-code-review.md](designs/08-code-review.md).
+- Browser (`Features/Browser/`, `macos/Browser/`, ⌘⇧B): Chromium (CEF) in a
+  module loaded with `dlopen` on first use, the `kinterm-browser` CLI and
+  MCP server, agent cursor and glow. Built by `macos/Browser/build.sh`,
+  signed for release by `macos/Browser/sign.sh`. Design:
+  [designs/09-browser.md](designs/09-browser.md), build notes:
+  [macos/Browser/README.md](../macos/Browser/README.md).
 
 **Seen working on screen**
 

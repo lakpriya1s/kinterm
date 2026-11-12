@@ -303,6 +303,42 @@ section[id]{scroll-margin-top:64px}
 .ap-ft span:last-child{margin-left:auto}
 /* Notifications */
 .tile .demo.notes-demo{height:auto;align-items:flex-start;margin-top:0;padding-top:26px}
+/* Work alongside: Grid View, Review, Browser, Connect Agents */
+.mgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px;width:100%;max-width:250px;padding:8px;border-radius:12px;background:var(--raise)}
+.mgrid div{height:70px;border-radius:7px;background:var(--bg);border:1px solid var(--edge);padding:8px;display:flex;flex-direction:column;gap:5px}
+.mgrid div.on{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
+.mgrid b{display:flex;align-items:center;gap:5px}.mgrid b::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--c)}
+.mgrid b::after{content:"";height:3px;width:34px;border-radius:2px;background:var(--dim)}
+.mgrid i{height:3px;border-radius:2px;background:var(--edge2);width:var(--w)}
+.mdiff{width:100%;max-width:280px;border-radius:12px;background:var(--bg);border:1px solid var(--edge);padding:8px 0;font:600 11px/1 ui-monospace,Menlo,monospace}
+.mdiff div{display:flex;align-items:center;gap:8px;height:19px;padding:0 10px}
+.mdiff div::after{content:"";height:4px;border-radius:2px;width:var(--w);background:var(--dim)}
+.mdiff .add{background:rgba(63,185,80,.13);color:var(--done)}.mdiff .add::after{background:var(--done)}
+.mdiff .del{background:rgba(248,81,73,.13);color:var(--error)}.mdiff .del::after{background:var(--error)}
+.bw{width:100%;max-width:560px;border-radius:12px;overflow:hidden;border:1px solid var(--edge);background:var(--raise)}
+.bw .bar{display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;font-size:12px;color:var(--muted)}
+.bw .bar .url{flex:1;height:22px;border-radius:6px;background:var(--bg);display:flex;align-items:center;padding:0 10px}
+.bw .bar .agent{color:#fff;background:var(--blue);border-radius:9px;padding:1px 8px;font-weight:600;font-size:11px;animation:agentOn 6s infinite}
+.bw .page{position:relative;height:190px;background:#fff;color:#15161b;padding:20px 22px}
+.bw .page h5{margin:0;font-size:22px;letter-spacing:-.02em}
+.bw .page .row{display:flex;gap:8px;margin-top:14px}
+.bw .page .b{padding:5px 12px;border-radius:6px;background:#e3e5e9;border:1px solid #c9ccd2;font-size:13px}
+.bw .page .in{width:150px;padding:5px 10px;border-radius:6px;border:1px solid #b9bdc5;font-size:13px;color:#8b9099}
+.bw .glow{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 28px 6px rgba(92,160,255,.55),inset 0 0 0 1.5px var(--blue);animation:glow 6s infinite}
+.bw .cur{position:absolute;left:0;top:0;width:22px;height:22px;animation:cur 6s infinite cubic-bezier(.2,.8,.2,1)}
+.bw .cur::after{content:"Agent";position:absolute;left:18px;top:18px;font:600 10px system-ui;color:#fff;background:var(--blue);padding:1px 6px;border-radius:8px}
+.bw .rip{position:absolute;left:50px;top:76px;width:36px;height:36px;margin:-18px 0 0 -18px;border-radius:50%;border:2px solid var(--blue);background:rgba(92,160,255,.25);opacity:0;animation:rip 6s infinite}
+.bw .devtools{height:62px;background:#242424;border-top:1px solid #3a3d47;display:flex;gap:16px;align-items:flex-start;padding:9px 14px;font-size:11.5px;color:#a8adb7}
+.bw .devtools span:first-child{color:#8ab4f8;border-bottom:2px solid #8ab4f8;padding-bottom:4px}
+@keyframes glow{0%,8%{opacity:0}16%,72%{opacity:1}44%{opacity:.6}82%,100%{opacity:0}}
+@keyframes agentOn{0%,8%{opacity:0}16%,72%{opacity:1}82%,100%{opacity:0}}
+@keyframes cur{0%,10%{transform:translate(380px,140px);opacity:0}18%{opacity:1}30%,40%{transform:translate(48px,72px)}55%,70%{transform:translate(200px,72px);opacity:1}82%,100%{transform:translate(200px,72px);opacity:0}}
+@keyframes rip{0%,31%{opacity:0;transform:scale(.3)}33%{opacity:1;transform:scale(.3)}42%{opacity:0;transform:scale(1.6)}100%{opacity:0}}
+.connect{width:100%;display:flex;flex-direction:column;gap:10px}
+.connect .row{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:12px;background:var(--card);border:1px solid var(--edge);font-size:14px}
+.connect .row::before{content:"\2713";color:var(--done);font-weight:700}
+.connect .row code{margin-left:auto;color:var(--muted);font-size:12px}
+.connect .go{align-self:flex-end;margin-top:4px;padding:8px 16px;border-radius:9px;background:var(--blue);color:#fff;font-weight:600;font-size:14px}
 .notes{position:relative;width:100%;max-width:340px;height:356px}
 .notes .mn{position:absolute;inset:0 0 auto;transition:transform .6s cubic-bezier(.2,1,.3,1),opacity .6s}
 /* Accounts */
@@ -423,6 +459,7 @@ section[id]{scroll-margin-top:64px}
   .card{width:250px}
   }
 @media (prefers-reduced-motion:reduce){
+  .bw .glow,.bw .bar .agent{animation:none}.bw .cur{animation:none;transform:translate(48px,72px)}.bw .rip{display:none}
   *,*::before,*::after{animation:none!important;transition:none!important}
   html{scroll-behavior:auto}
   .reveal{opacity:1;translate:none}
@@ -636,6 +673,7 @@ section[id]{scroll-margin-top:64px}
     <span class="sp"></span>
     <a class="link hide-sm" href="#faces">Faces</a>
     <a class="link hide-sm" href="#features">Features</a>
+    <a class="link hide-sm" href="#tools">Tools</a>
     <a class="link hide-sm" href="#protocol">Protocol</a>
     <a class="link" href="https://github.com/lakpriya1s/kinterm" aria-label="KinTerm on GitHub">GitHub</a>
     <a class="btn sm" data-dl href="https://github.com/lakpriya1s/kinterm/releases/latest/download/KinTerm.dmg">Download</a>
@@ -748,6 +786,75 @@ section[id]{scroll-margin-top:64px}
           <h3>A dock icon that cares</h3>
           <p>It takes the colour and face of the agent that needs you most, with a badge for those waiting or done.</p>
           <div class="demo" style="flex-direction:column"><div class="icon-cyc" id="iconCyc"><span class="bdg" id="iconBdg"></span></div><div class="mbstyle" id="iconState"></div></div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- Work alongside: Grid View, Review, Browser -->
+  <section class="sec" id="tools" style="padding-top:0">
+    <div class="wrap">
+      <div class="reveal">
+        <div class="eyebrow">Work alongside them</div>
+        <h2>Watch them build.<br><span class="mute">Check what they changed.</span></h2>
+        <p class="sub">See every agent at once, review their changes like a pull request, and watch your app in a browser they can drive.</p>
+      </div>
+      <div class="bento">
+        <article class="tile w4 reveal">
+          <h3>A browser your agents can use</h3>
+          <p>Your dev server beside the terminal, with Chrome's DevTools docked under it. Agents click, type and read the console through MCP, and you watch: the page glows and their cursor shows every click. <span class="kbd">&#8984;&#8679;B</span></p>
+          <div class="demo">
+            <div class="bw" aria-label="KinTerm's browser while an agent clicks a button">
+              <div class="bar"><span>&#8249; &#8250; &#8635;</span><span class="url">localhost:3000</span><span class="agent">Agent</span></div>
+              <div class="page">
+                <h5>Hello from the dev server</h5>
+                <div class="row"><span class="b">Sign up</span><span class="in">Email</span></div>
+                <span class="rip"></span>
+                <svg class="cur" viewBox="0 0 22 22" aria-hidden="true"><path d="M3 2 L3 18 L7.5 13.8 L10.6 20.5 L13.4 19.2 L10.4 12.6 L16.5 12.6 Z" fill="#5ca0ff" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>
+                <span class="glow"></span>
+              </div>
+              <div class="devtools"><span>Elements</span><span>Console</span><span>Network</span><span>Performance</span></div>
+            </div>
+          </div>
+        </article>
+        <article class="tile reveal">
+          <h3>Grid View</h3>
+          <p>Every tab as a live tile, so all your agents are on screen. <span class="kbd">&#8984;&#8679;E</span></p>
+          <div class="demo">
+            <div class="mgrid" aria-hidden="true">
+              <div class="on"><b style="--c:var(--working)"></b><i style="--w:80%"></i><i style="--w:55%"></i></div>
+              <div><b style="--c:var(--waiting)"></b><i style="--w:70%"></i><i style="--w:40%"></i></div>
+              <div><b style="--c:var(--done)"></b><i style="--w:60%"></i><i style="--w:75%"></i></div>
+              <div><b style="--c:var(--working)"></b><i style="--w:45%"></i><i style="--w:65%"></i></div>
+            </div>
+          </div>
+        </article>
+        <article class="tile reveal">
+          <h3>Review Changes</h3>
+          <p>What an agent changed, as GitHub-style diffs. Revert a hunk, or comment and send it back. <span class="kbd">&#8984;&#8679;R</span></p>
+          <div class="demo">
+            <div class="mdiff" aria-hidden="true">
+              <div style="--w:60%">&nbsp;</div>
+              <div class="del" style="--w:72%">&minus;</div>
+              <div class="del" style="--w:48%">&minus;</div>
+              <div class="add" style="--w:80%">+</div>
+              <div class="add" style="--w:64%">+</div>
+              <div class="add" style="--w:40%">+</div>
+              <div style="--w:52%">&nbsp;</div>
+            </div>
+          </div>
+        </article>
+        <article class="tile w4 reveal">
+          <h3>One click to connect</h3>
+          <p>The Setup Assistant installs the KinTerm skill, so Claude Code knows about all this, and gives Claude Code and Codex the browser's tools. Nothing loads until you use it.</p>
+          <div class="demo">
+            <div class="connect" aria-label="Connect Agents in the Setup Assistant">
+              <div class="row">KinTerm skill <code>~/.claude/skills/kinterm</code></div>
+              <div class="row">Browser tools for Claude Code <code>kinterm-browser mcp</code></div>
+              <div class="row">Browser tools for Codex <code>kinterm-browser mcp</code></div>
+              <span class="go">Connect Agents</span>
+            </div>
+          </div>
         </article>
       </div>
     </div>

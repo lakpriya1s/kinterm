@@ -15,7 +15,7 @@ who's done and who needs you, without opening a single tab.
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-ready-d97757.svg)](#claude-code)
 [![Built on Ghostty](https://img.shields.io/badge/built%20on-Ghostty-3551f3.svg)](#credits)
 
-[Website](https://lakpriya.com/kinterm/) · [Download](https://github.com/lakpriya1s/kinterm/releases/latest) · [Features](#features) · [Claude Code](#claude-code) · [Any agent](#any-agent-osc-7501) · [Build](#build-from-source) · [Credits](#credits)
+[Website](https://lakpriya.com/kinterm/) · [Download](https://github.com/lakpriya1s/kinterm/releases/latest) · [Features](#features) · [Work alongside](#work-alongside-your-agents) · [Claude Code](#claude-code) · [Any agent](#any-agent-osc-7501) · [Build](#build-from-source) · [Credits](#credits)
 
 </div>
 
@@ -64,18 +64,54 @@ A tab with splits shows its most urgent agent: waiting, then error, done, workin
 | 🧭 | **Agents panel.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>A</kbd> lists every agent in every window, most urgent first. <kbd>⌘</kbd><kbd>J</kbd> jumps straight to the next one waiting on you |
 | 👥 | **Several Claude accounts.** Each account gets a colour, as a tint or a ring on its tabs. The `+` menu and <kbd>⌥</kbd><kbd>⌘</kbd><kbd>1</kbd>–<kbd>9</kbd> open a Claude Code tab with a given account, optionally in a new git worktree |
 | 🧩 | **Subagents.** A small badge counts the subagents a session is running |
-| 🪄 | **Setup Assistant.** On first launch, pick your faces, size and tab bar by looking at them, and it installs the Claude Code hook for you |
+| 🪄 | **Setup Assistant.** On first launch, pick your faces, size and tab bar by looking at them, and it installs the Claude Code hook for you. After an update it shows what's new, once |
+| ▦ | **Grid View.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>E</kbd> shows every tab of a window as a live tile, so all your agents are on screen at once |
+| ✅ | **Review Changes.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd> shows what an agent changed as GitHub-style diffs. [More below](#work-alongside-your-agents) |
+| 🌐 | **A browser agents can use.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>B</kbd> opens your dev server beside the terminal, with Chrome's DevTools. [More below](#work-alongside-your-agents) |
+| 🎨 | **Tab colours.** Right-click a tab, or an account, to give it a colour |
 | 📡 | **An open protocol.** Any agent or script can report its state with [OSC 7501](#any-agent-osc-7501) |
 | 🔄 | **Updates itself.** New versions arrive in the app, no reinstalling |
+
+## Work alongside your agents
+
+Seeing that an agent is done is half of it. Then you check what it did.
+
+**Review Changes** (<kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd>) shows the changes in the focused
+tab's git repository like a pull request: a file list and GitHub-style diffs, for
+everything uncommitted, everything this session, or just the agent's last turn. Revert a
+hunk or a file, mark files as viewed, and leave comments on lines; **Send** types them
+into the agent's prompt for you to send. It opens beside the terminal, in its own window,
+or as one more tile in Grid View.
+
+**The browser** (<kbd>⌘</kbd><kbd>⇧</kbd><kbd>B</kbd>) shows your dev server beside the
+terminal: type `3000` or `localhost:5173` in its address bar, run
+`kinterm-browser open 3000`, or ⌘-click a localhost link. It's Chromium, with Chrome's
+DevTools docked under the page (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>I</kbd>), and it can move into a
+window of its own. Agents can use it too: they open pages, click, type and read the
+console and network requests through an MCP server (Chrome DevTools MCP, pointed at this
+browser). While they do, the page glows blue and shows their cursor and clicks. The
+browser loads nothing until you open it. It needs Apple silicon.
+
+**Connect Agents**, in the Setup Assistant, installs the **KinTerm skill** for Claude Code
+(so agents know to show their work in the browser and hand changes over for review) and
+gives Claude Code and Codex the browser's tools. Or from a terminal:
+
+```sh
+kinterm-browser open 3000      # open or show a page
+kinterm-browser status         # what's open
+kinterm-browser mcp            # the MCP server, for any agent
+```
 
 ## Install
 
 1. Download **KinTerm.dmg** from the [latest release](https://github.com/lakpriya1s/kinterm/releases/latest).
 2. Open it and drag **KinTerm** to Applications.
-3. Open KinTerm. The **Setup Assistant** walks you through the faces, the tab bar and
-   the Claude Code hook. You can open it again any time from **KinTerm › Setup Assistant…**
+3. Open KinTerm. The **Setup Assistant** walks you through the faces, the tab bar,
+   the Claude Code hook and connecting your agents to the browser. You can open it
+   again any time from **KinTerm › Setup Assistant…**
 
-Requirements: macOS 13 Ventura or later, on Apple silicon or Intel. KinTerm checks for
+Requirements: macOS 13 Ventura or later, on Apple silicon or Intel. The built-in
+browser needs Apple silicon. KinTerm checks for
 updates on its own, or use **KinTerm › Check for Updates…**
 
 ## Claude Code
@@ -135,6 +171,7 @@ You need [Zig](https://ziglang.org) and Xcode.
 ```sh
 git clone https://github.com/lakpriya1s/kinterm.git && cd kinterm
 zig build -Demit-macos-app=false                      # the core library
+macos/Browser/build.sh                                # optional: the browser (Chromium)
 cd macos && xcodebuild -target Ghostty -configuration Debug
 open build/Debug/KinTerm.app
 ```
@@ -154,6 +191,9 @@ Ghostty's changes.
 **Does it only work with Claude Code?** Claude Code works out of the box. Any other agent
 or script can show a face with [OSC 7501](#any-agent-osc-7501).
 
+**Why is the app so big?** The built-in browser is Chromium, about 330 MB. It doesn't
+load or run until you open it.
+
 **Linux?** Not yet. KinTerm is macOS only for now.
 
 **Is it free?** Yes, free and open source under the MIT license.
@@ -172,7 +212,9 @@ KinTerm is built on **[Ghostty](https://github.com/ghostty-org/ghostty)** by
 everything that makes it a great terminal comes from their work: thank you. KinTerm is an
 independent project and isn't affiliated with or endorsed by Ghostty.
 
-Updates are delivered with [Sparkle](https://sparkle-project.org). The status protocol is
+Updates are delivered with [Sparkle](https://sparkle-project.org). The browser is
+[Chromium Embedded Framework](https://github.com/chromiumembedded/cef), and agents drive
+it with [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp). The status protocol is
 [OSC 7501](https://www.superlogical.com/rex/docs/build/program-status).
 
 ## License
