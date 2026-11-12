@@ -69,6 +69,9 @@ static void RunEdit(CefRefPtr<CefBrowser> browser, int command) {
 // depend on it.
 static int EditCommandForKey(const CefKeyEvent& event, NSEvent* ns_event) {
   if (event.type != KEYEVENT_RAWKEYDOWN) return -1;
+  // Chromium reports pressing ⌘ itself as a key down too, but its event is
+  // a modifier change, which has no characters: asking throws.
+  if (!ns_event || ns_event.type != NSEventTypeKeyDown) return -1;
   uint32_t mods = event.modifiers & (EVENTFLAG_COMMAND_DOWN | EVENTFLAG_SHIFT_DOWN | EVENTFLAG_CONTROL_DOWN |
                                      EVENTFLAG_ALT_DOWN);
   NSString* key = ns_event.charactersIgnoringModifiers.lowercaseString;
@@ -424,6 +427,8 @@ class KTClient : public CefClient,
                      bool* is_keyboard_shortcut) override {
     if (!os_event || event.type != KEYEVENT_RAWKEYDOWN || !(event.modifiers & EVENTFLAG_COMMAND_DOWN)) return false;
     NSEvent* ns_event = CAST_CEF_EVENT_HANDLE_TO_NSEVENT(os_event);
+    // Only real key presses can be menu shortcuts (see EditCommandForKey).
+    if (ns_event.type != NSEventTypeKeyDown) return false;
     // Edit shortcuts (⌘C, ⌘V, ⌘A…) act on the page directly.
     int edit = EditCommandForKey(event, ns_event);
     if (edit >= 0) {
