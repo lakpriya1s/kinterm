@@ -3,24 +3,33 @@ import UserNotifications
 
 /// The Setup Assistant's pages. See `OnboardingController`.
 struct OnboardingView: View {
+    /// The whole wizard, or only what's new since you last saw it.
+    enum Mode { case setup, whatsNew }
+
+    var mode: Mode = .setup
     let finish: () -> Void
 
     enum Step: Int, CaseIterable {
-        case welcome, faces, tabBar, claude, stayInLoop, done
+        case welcome, faces, tabBar, claude, tools, stayInLoop, done
     }
 
-    @State private var step: Step = Self.firstStep
+    /// The pages of this mode, in order.
+    private var steps: [Step] { mode == .setup ? Step.allCases : [.tools] }
+
+    @State private var index = Self.firstIndex
+
+    private var step: Step { steps[min(index, steps.count - 1)] }
 
     /// Debug builds can open on a page, to check its layout:
     /// KINTERM_ONBOARDING_STEP=claude.
-    private static var firstStep: Step {
+    private static var firstIndex: Int {
         #if DEBUG
         if let name = ProcessInfo.processInfo.environment["KINTERM_ONBOARDING_STEP"],
            let step = Step.allCases.first(where: { "\($0)" == name }) {
-            return step
+            return step.rawValue
         }
         #endif
-        return .welcome
+        return 0
     }
 
     var body: some View {
@@ -31,6 +40,7 @@ struct OnboardingView: View {
                 case .faces: OnboardingFaces()
                 case .tabBar: OnboardingTabBar()
                 case .claude: OnboardingClaude()
+                case .tools: OnboardingTools(isNew: mode == .whatsNew)
                 case .stayInLoop: OnboardingStayInLoop()
                 case .done: OnboardingDone()
                 }
@@ -49,22 +59,24 @@ struct OnboardingView: View {
     private var footer: some View {
         HStack(spacing: 12) {
             HStack(spacing: 6) {
-                ForEach(Step.allCases, id: \.self) { item in
-                    Capsule()
-                        .fill(item == step ? OnboardingColors.accent : OnboardingColors.dot)
-                        .frame(width: item == step ? 18 : 6, height: 6)
+                if steps.count > 1 {
+                    ForEach(steps, id: \.self) { item in
+                        Capsule()
+                            .fill(item == step ? OnboardingColors.accent : OnboardingColors.dot)
+                            .frame(width: item == step ? 18 : 6, height: 6)
+                    }
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: step)
 
             Spacer()
 
-            if step != .welcome {
+            if index > 0 {
                 Button("Back") { move(-1) }
                     .buttonStyle(OnboardingButtonStyle(primary: false))
             }
             Button(primaryTitle) {
-                if step == .done { finish() } else { move(1) }
+                if index >= steps.count - 1 { finish() } else { move(1) }
             }
             .buttonStyle(OnboardingButtonStyle(primary: true))
             .keyboardShortcut(.defaultAction)
@@ -76,6 +88,7 @@ struct OnboardingView: View {
     }
 
     private var primaryTitle: String {
+        if mode == .whatsNew { return "Got It" }
         switch step {
         case .welcome: return "Get Started"
         case .done: return "Start Using KinTerm"
@@ -84,8 +97,7 @@ struct OnboardingView: View {
     }
 
     private func move(_ offset: Int) {
-        guard let next = Step(rawValue: step.rawValue + offset) else { return }
-        step = next
+        index = max(0, min(steps.count - 1, index + offset))
     }
 }
 
@@ -289,6 +301,242 @@ private struct OnboardingClaude: View {
     }
 }
 
+/// The views for checking on agents' work: Grid View, Code Review and the
+/// browser, and a few other things worth knowing. Also shown alone as
+/// "What's New" to people who finished the wizard before these existed.
+private struct OnboardingTools: View {
+    let isNew: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            OnboardingHeading(
+                title: isNew ? "New in KinTerm" : "Work alongside your agents",
+                detail: "See every agent at once, check what they changed, and watch your app as they build it.")
+
+            HStack(alignment: .top, spacing: 12) {
+                OnboardingTool(
+                    title: "Grid View", keys: "⌘⇧E",
+                    text: "Every tab as a live tile, so all your agents are on screen.") {
+                    OnboardingGridSketch()
+                }
+                OnboardingTool(
+                    title: "Review Changes", keys: "⌘⇧R",
+                    text: "GitHub-style diffs of what an agent changed. Revert a hunk, or comment back.") {
+                    OnboardingDiffSketch()
+                }
+                OnboardingTool(
+                    title: "Browser", keys: "⌘⇧B",
+                    text: "Your dev server with Chrome DevTools. Agents can click through it while you watch.") {
+                    OnboardingBrowserSketch()
+                } extra: {
+                    if BrowserEngine.isInstalled {
+                        Button("Let Agents Use It") { BrowserAgentInstaller.presentConnect() }
+                            .buttonStyle(OnboardingButtonStyle(primary: false))
+                            .help("Adds the browser's MCP server to Claude Code and Codex")
+                    }
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 12) {
+                OnboardingTip(keys: "⌥⌘1–9", text: "A Claude Code tab for an account, in a new git worktree if you like")
+                OnboardingTip(keys: "Right-click", text: "A tab's color, or an account's")
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// One of the tools: a sketch, its name and shortcut, and what it's for.
+private struct OnboardingTool<Sketch: View, Extra: View>: View {
+    let title: String
+    let keys: String
+    let text: String
+    @ViewBuilder let sketch: () -> Sketch
+    @ViewBuilder var extra: () -> Extra
+
+    init(
+        title: String, keys: String, text: String,
+        @ViewBuilder sketch: @escaping () -> Sketch,
+        @ViewBuilder extra: @escaping () -> Extra = { EmptyView() }
+    ) {
+        self.title = title
+        self.keys = keys
+        self.text = text
+        self.sketch = sketch
+        self.extra = extra
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sketch()
+                .frame(height: 96)
+                .frame(maxWidth: .infinity)
+            HStack {
+                Text(title).font(.system(size: 13, weight: .semibold))
+                Spacer()
+                OnboardingKeys(keys: keys)
+            }
+            Text(text)
+                .font(.system(size: 11.5))
+                .foregroundColor(OnboardingColors.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            extra()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(OnboardingColors.card))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(OnboardingColors.border))
+    }
+}
+
+private struct OnboardingKeys: View {
+    let keys: String
+
+    var body: some View {
+        Text(keys)
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 5).fill(OnboardingColors.cardHovered))
+            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(OnboardingColors.border))
+    }
+}
+
+private struct OnboardingTip: View {
+    let keys: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            OnboardingKeys(keys: keys)
+            Text(text).font(.system(size: 12)).foregroundColor(OnboardingColors.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(RoundedRectangle(cornerRadius: 12).fill(OnboardingColors.card))
+    }
+}
+
+/// Four agent tiles, one with the keyboard.
+private struct OnboardingGridSketch: View {
+    private let states: [AgentFaceView.State] = [.working, .blocked, .done, .working]
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ForEach(0..<2, id: \.self) { row in
+                HStack(spacing: 4) {
+                    ForEach(0..<2, id: \.self) { column in
+                        tile(states[row * 2 + column], focused: row == 0 && column == 0)
+                    }
+                }
+            }
+        }
+        .padding(5)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(agentHex: 0x22242a)))
+    }
+
+    private func tile(_ state: AgentFaceView.State, focused: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Circle().fill(AgentFaceView.color(for: state)).frame(width: 6, height: 6)
+                RoundedRectangle(cornerRadius: 1).fill(OnboardingColors.muted.opacity(0.7)).frame(width: 26, height: 3)
+            }
+            ForEach([0.8, 0.55, 0.7], id: \.self) { width in
+                GeometryReader { geo in
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(OnboardingColors.muted.opacity(0.35))
+                        .frame(width: geo.size.width * width, height: 2.5)
+                }
+                .frame(height: 2.5)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(5)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(RoundedRectangle(cornerRadius: 4).fill(Color(agentHex: 0x16171b)))
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(
+            focused ? OnboardingColors.accent : OnboardingColors.border, lineWidth: focused ? 1.5 : 1))
+    }
+}
+
+/// A few lines of a diff.
+private struct OnboardingDiffSketch: View {
+    private let lines: [(kind: Int, width: CGFloat)] = [
+        (0, 0.6), (-1, 0.75), (-1, 0.5), (1, 0.8), (1, 0.65), (1, 0.45), (0, 0.55),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(lines.indices, id: \.self) { index in
+                let line = lines[index]
+                HStack(spacing: 5) {
+                    Text(line.kind > 0 ? "+" : line.kind < 0 ? "−" : " ")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(color(line.kind))
+                        .frame(width: 6)
+                    GeometryReader { geo in
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(line.kind == 0 ? OnboardingColors.muted.opacity(0.45) : color(line.kind).opacity(0.8))
+                            .frame(width: geo.size.width * line.width, height: 3)
+                            .frame(maxHeight: .infinity)
+                    }
+                }
+                .frame(height: 9)
+                .padding(.horizontal, 4)
+                .background(line.kind == 0 ? Color.clear : color(line.kind).opacity(0.14))
+            }
+        }
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(agentHex: 0x16171b)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(OnboardingColors.border))
+    }
+
+    private func color(_ kind: Int) -> Color {
+        kind > 0 ? Color(agentHex: 0x3fb950) : Color(agentHex: 0xf85149)
+    }
+}
+
+/// A page with an agent's cursor and the glow it shows while it works.
+private struct OnboardingBrowserSketch: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                ForEach(0..<3, id: \.self) { _ in Circle().fill(Color(agentHex: 0x4a4e59)).frame(width: 4, height: 4) }
+                RoundedRectangle(cornerRadius: 3).fill(Color(agentHex: 0x2c2e35)).frame(height: 9)
+                Capsule().fill(OnboardingColors.accent).frame(width: 22, height: 8)
+            }
+            .padding(.horizontal, 6)
+            .frame(height: 16)
+            .background(Color(agentHex: 0x22242a))
+
+            ZStack(alignment: .topLeading) {
+                Color.white
+                VStack(alignment: .leading, spacing: 5) {
+                    RoundedRectangle(cornerRadius: 1).fill(Color(agentHex: 0x24262d)).frame(width: 70, height: 6)
+                    HStack(spacing: 4) {
+                        RoundedRectangle(cornerRadius: 2).fill(Color(agentHex: 0xd0d3d9)).frame(width: 30, height: 11)
+                        RoundedRectangle(cornerRadius: 2).strokeBorder(Color(agentHex: 0xb0b4bc)).frame(width: 44, height: 11)
+                    }
+                }
+                .padding(8)
+                Image(systemName: "cursorarrow")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(OnboardingColors.accent)
+                    .offset(x: 26, y: 28)
+                Rectangle()
+                    .strokeBorder(OnboardingColors.accent.opacity(0.5), lineWidth: 8)
+                    .blur(radius: 6)
+                    .clipped()
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(OnboardingColors.border))
+    }
+}
+
 private struct OnboardingStayInLoop: View {
     @ObservedObject private var settings = AgentTabBarSettings.shared
     @State private var notifications: UNAuthorizationStatus = .notDetermined
@@ -384,11 +632,15 @@ private struct OnboardingDone: View {
         ("Hover", "Agent details"),
         ("⌘⇧A", "Every agent"),
         ("⌘J", "Agent waiting on you"),
+        ("⌘⇧E", "All tabs in a grid"),
+        ("⌘⇧R", "Review an agent's changes"),
+        ("⌘⇧B", "Browser"),
+        ("⌥⌘1–9", "Claude Code tab for an account"),
     ]
 
     var body: some View {
-        VStack(spacing: 22) {
-            KinTermMark(front: OnboardingColors.done, expression: .done).frame(width: 96, height: 96)
+        VStack(spacing: 16) {
+            KinTermMark(front: OnboardingColors.done, expression: .done).frame(width: 80, height: 80)
             Text("You're all set").font(.system(size: 26, weight: .semibold))
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 2), spacing: 12) {
                 ForEach(tips, id: \.keys) { tip in
