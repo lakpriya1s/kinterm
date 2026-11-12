@@ -44,7 +44,9 @@ enum BrowserEngine {
         var errorDescription: String? {
             switch self {
             case .notInstalled:
-                return "This build of KinTerm doesn't include the browser. Run macos/Browser/build.sh, then build KinTerm again."
+                return BrowserEngine.isSupported
+                    ? "This build of KinTerm doesn't include the browser. Run macos/Browser/build.sh, then build KinTerm again."
+                    : "KinTerm's browser runs on Mac computers with Apple silicon."
             case .loadFailed(let reason):
                 return "The browser couldn't be loaded: \(reason)"
             case .startFailed(let code):
@@ -59,9 +61,19 @@ enum BrowserEngine {
 
     private static var moduleURL: URL? { frameworks?.appendingPathComponent("KinTermBrowser.dylib") }
 
-    /// Whether this build includes the browser.
+    /// Chromium is only built for Apple silicon; a universal KinTerm on an
+    /// Intel Mac has the module but can't load it.
+    static var isSupported: Bool {
+        #if arch(arm64)
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    /// Whether this build includes the browser, for this Mac.
     static var isInstalled: Bool {
-        guard let path = moduleURL?.path else { return false }
+        guard isSupported, let path = moduleURL?.path else { return false }
         return FileManager.default.fileExists(atPath: path)
     }
 

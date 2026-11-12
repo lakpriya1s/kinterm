@@ -51,6 +51,9 @@ xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1 || {
 echo "==> Building GhosttyKit (ReleaseFast) for KinTerm $VERSION ($BUILD)"
 (cd "$ROOT" && zig build -Doptimize=ReleaseFast -Demit-macos-app=false "-Dversion-string=$VERSION")
 
+echo "==> Building the browser (Chromium)"
+"$ROOT/macos/Browser/build.sh"
+
 echo "==> Building KinTerm.app (Release)"
 (cd "$ROOT/macos" && xcodebuild -target Ghostty -configuration Release -quiet)
 
@@ -74,6 +77,7 @@ for part in Versions/B/XPCServices/Downloader.xpc Versions/B/XPCServices/Install
 done
 sign "$sparkle"
 sign "$APP/Contents/PlugIns/DockTilePlugin.plugin"
+"$ROOT/macos/Browser/sign.sh" "$APP" "$IDENTITY"
 sign --entitlements "$ROOT/macos/Ghostty.entitlements" "$APP"
 /usr/bin/codesign --verify --deep --strict "$APP"
 

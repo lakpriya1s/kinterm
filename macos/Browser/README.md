@@ -35,7 +35,11 @@ this way, so keep it current.
 
 ## Signing
 
-`embed.sh` signs with the build's identity. The helpers get the hardened
-runtime with `helper.entitlements` (JIT for V8). Release builds must sign
-everything with the same team, since the main app keeps library
-validation on.
+`embed.sh` signs with the build's identity (ad hoc in Debug). For release,
+`sign.sh <app> <identity>` signs Chromium's libraries, its framework, the
+module and the helpers with the hardened runtime and a timestamp, the
+helpers with `helper.entitlements` (JIT for V8). The release workflow and
+`scripts/release-mac.sh` run it before signing the app. Everything must be
+signed by the same team, since the main app keeps library validation on;
+the main app itself needs no extra entitlements (checked with the hardened
+runtime and `Ghostty.entitlements`).
