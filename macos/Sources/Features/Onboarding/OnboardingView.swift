@@ -18,6 +18,9 @@ struct OnboardingView: View {
 
     @State private var index = Self.firstIndex
 
+    /// Connect Agents on the tools page.
+    @StateObject private var connect = OnboardingConnect()
+
     private var step: Step { steps[min(index, steps.count - 1)] }
 
     /// Debug builds can open on a page, to check its layout:
@@ -40,7 +43,7 @@ struct OnboardingView: View {
                 case .faces: OnboardingFaces()
                 case .tabBar: OnboardingTabBar()
                 case .claude: OnboardingClaude()
-                case .tools: OnboardingTools(isNew: mode == .whatsNew)
+                case .tools: OnboardingTools(isNew: mode == .whatsNew, connect: connect)
                 case .stayInLoop: OnboardingStayInLoop()
                 case .done: OnboardingDone()
                 }
@@ -75,11 +78,20 @@ struct OnboardingView: View {
                 Button("Back") { move(-1) }
                     .buttonStyle(OnboardingButtonStyle(primary: false))
             }
-            Button(primaryTitle) {
-                if index >= steps.count - 1 { finish() } else { move(1) }
+            if step == .tools, connect.state != .done {
+                // Connecting is the default here; skipping is one click.
+                Button("Not Now") { next() }
+                    .buttonStyle(OnboardingButtonStyle(primary: false))
+                Button(connect.state == .working ? "Connecting…" : "Connect Agents") { connect.run() }
+                    .buttonStyle(OnboardingButtonStyle(primary: true))
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(connect.state == .working)
+                    .help("Install the KinTerm skill and the browser's tools for Claude Code and Codex")
+            } else {
+                Button(primaryTitle) { next() }
+                    .buttonStyle(OnboardingButtonStyle(primary: true))
+                    .keyboardShortcut(.defaultAction)
             }
-            .buttonStyle(OnboardingButtonStyle(primary: true))
-            .keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, 44)
         .padding(.vertical, 20)
@@ -94,6 +106,10 @@ struct OnboardingView: View {
         case .done: return "Start Using KinTerm"
         default: return "Continue"
         }
+    }
+
+    private func next() {
+        if index >= steps.count - 1 { finish() } else { move(1) }
     }
 
     private func move(_ offset: Int) {
@@ -306,6 +322,7 @@ private struct OnboardingClaude: View {
 /// "What's New" to people who finished the wizard before these existed.
 private struct OnboardingTools: View {
     let isNew: Bool
+    @ObservedObject var connect: OnboardingConnect
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -328,15 +345,11 @@ private struct OnboardingTools: View {
                     title: "Browser", keys: "⌘⇧B",
                     text: "Your dev server with Chrome DevTools. Agents can click through it while you watch.") {
                     OnboardingBrowserSketch()
-                } extra: {
-                    if BrowserEngine.isInstalled {
-                        Button("Let Agents Use It") { BrowserAgentInstaller.presentConnect() }
-                            .buttonStyle(OnboardingButtonStyle(primary: false))
-                            .help("Adds the browser's MCP server to Claude Code and Codex")
-                    }
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
+
+            connectNote
 
             HStack(spacing: 12) {
                 OnboardingTip(keys: "⌥⌘1–9", text: "A Claude Code tab for an account, in a new git worktree if you like")
@@ -347,25 +360,52 @@ private struct OnboardingTools: View {
     }
 }
 
+extension OnboardingTools {
+    /// What Connect Agents does, then how it went.
+    @ViewBuilder fileprivate var connectNote: some View {
+        switch connect.state {
+        case .idle, .working:
+            OnboardingNote(
+                symbol: "sparkles",
+                text: "Connect Agents installs the KinTerm skill, so Claude Code knows about these, "
+                    + (BrowserEngine.isInstalled
+                        ? "and lets Claude Code and Codex drive the browser. Restart running agents after."
+                        : "for each Claude Code account. Restart running agents after."))
+        case .done:
+            let failed = connect.outcomes.filter { !$0.ok }
+            OnboardingNote(
+                symbol: failed.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
+                text: failed.isEmpty
+                    ? "Connected. Restart running agents to pick it up."
+                    : "Some didn't connect: " + failed.map { "\($0.name): \($0.detail)" }.joined(separator: "; "))
+        }
+    }
+}
+
+/// Connect Agents: the skill and the browser's tools, for every account.
+final class OnboardingConnect: ObservableObject {
+    enum State { case idle, working, done }
+
+    @Published private(set) var state = State.idle
+    @Published private(set) var outcomes: [BrowserAgentInstaller.Outcome] = []
+
+    @MainActor
+    func run() {
+        guard state != .working else { return }
+        state = .working
+        BrowserAgentInstaller.connect(claudeFolders: BrowserAgentInstaller.claudeFolders) { [weak self] outcomes in
+            self?.outcomes = outcomes
+            self?.state = .done
+        }
+    }
+}
+
 /// One of the tools: a sketch, its name and shortcut, and what it's for.
-private struct OnboardingTool<Sketch: View, Extra: View>: View {
+private struct OnboardingTool<Sketch: View>: View {
     let title: String
     let keys: String
     let text: String
     @ViewBuilder let sketch: () -> Sketch
-    @ViewBuilder var extra: () -> Extra
-
-    init(
-        title: String, keys: String, text: String,
-        @ViewBuilder sketch: @escaping () -> Sketch,
-        @ViewBuilder extra: @escaping () -> Extra = { EmptyView() }
-    ) {
-        self.title = title
-        self.keys = keys
-        self.text = text
-        self.sketch = sketch
-        self.extra = extra
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -382,7 +422,6 @@ private struct OnboardingTool<Sketch: View, Extra: View>: View {
                 .foregroundColor(OnboardingColors.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            extra()
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
