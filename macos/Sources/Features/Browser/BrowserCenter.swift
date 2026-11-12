@@ -68,6 +68,131 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
     func start() {
         BrowserControlServer.shared.start()
         BrowserAgentInstaller.updateInstalledCLI()
+        installEditKeys()
+    }
+
+    // MARK: Edit keys
+
+    private var editKeyMonitor: Any?
+
+    /// ⌘C, ⌘V, ⌘X, ⌘A (and ⌘Z, ⌘⇧Z in a page) in the browser: in the page,
+    /// and in text fields such as the address field. They're handled here,
+    /// before anything else sees the key: KinTerm's Edit menu shortcuts
+    /// follow the terminal's keybindings, and a terminal in the same window
+    /// can take them first.
+    @MainActor
+    private func installEditKeys() {
+        guard editKeyMonitor == nil else { return }
+        editKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            BrowserCenter.handleEditKey(event) ? nil : event
+        }
+    }
+
+    @MainActor
+    private static func handleEditKey(_ event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard mods == [.command] || mods == [.command, .shift],
+              let key = event.charactersIgnoringModifiers?.lowercased(),
+              let window = event.window, window.isKeyWindow,
+              let responder = window.firstResponder as? NSView else { return false }
+
+        // A page (or its docked DevTools) has the keyboard.
+        var view: NSView? = responder
+        while let current = view {
+            if let container = current as? BrowserContainerView {
+                let command: BrowserEngine.Edit?
+                switch (key, mods == [.command, .shift]) {
+                case ("z", false): command = .undo
+                case ("z", true): command = .redo
+                case ("x", false): command = .cut
+                case ("c", false): command = .copy
+                case ("v", false): command = .paste
+                case ("a", false): command = .selectAll
+                default: command = nil
+                }
+                guard let command, let page = container.page else { return false }
+                if container === page.container {
+                    page.edit(command)
+                    return true
+                }
+                // Docked DevTools: Chromium handles it (kinterm_browser.mm).
+                return false
+            }
+            view = current.superview
+        }
+
+        // A text field in a browser window or panel, such as the address.
+        guard mods == [.command], let text = responder as? NSTextView, text.isFieldEditor,
+              isInBrowser(text) else { return false }
+        let action: Selector
+        switch key {
+        case "x": action = #selector(NSText.cut(_:))
+        case "c": action = #selector(NSText.copy(_:))
+        case "v": action = #selector(NSText.paste(_:))
+        case "a": action = #selector(NSText.selectAll(_:))
+        default: return false
+        }
+        return NSApp.sendAction(action, to: text, from: nil)
+    }
+
+    /// Whether a field editor is editing a browser's address field.
+    @MainActor
+    private static func isInBrowser(_ text: NSTextView) -> Bool {
+        guard let window = text.window else { return false }
+        return shared.allPages.contains { $0.addressFocused && $0.container.window === window }
+    }
+
+    // MARK: Agents
+
+    /// The tab a page belongs to: the one it's beside, the one it popped
+    /// out of, or for a grid's tile, the grid's focused tab.
+    @MainActor
+    func owner(of page: BrowserPage) -> BaseTerminalController? {
+        let controllers = NSApp.windows.compactMap { $0.windowController as? BaseTerminalController }
+        if let key = panels.first(where: { $0.value === page })?.key {
+            return controllers.first { ObjectIdentifier($0) == key }
+        }
+        if let entry = windows[ObjectIdentifier(page)] { return entry.from.value }
+        if let key = gridPages.first(where: { $0.value === page })?.key {
+            for window in NSApp.windows where Self.gridKey(window) == key && TerminalGridModel.shared.isActive(for: window) {
+                if let focused = TerminalGridModel.shared.focusedController(in: window) { return focused }
+            }
+        }
+        return nil
+    }
+
+    /// The tab a terminal is in, from its KINTERM_SURFACE_ID.
+    @MainActor
+    func controller(forSurface id: String) -> BaseTerminalController? {
+        guard let uuid = UUID(uuidString: id) else { return nil }
+        for window in NSApp.windows {
+            guard let controller = window.windowController as? BaseTerminalController else { continue }
+            if controller.surfaceTree.contains(where: { $0.id == uuid }) { return controller }
+        }
+        return nil
+    }
+
+    /// The browser a tab's agents use: the grid's tile in Grid View, the
+    /// panel beside it, or the one that popped out of it. Never another
+    /// tab's.
+    @MainActor
+    func page(for controller: BaseTerminalController) -> BrowserPage? {
+        if let window = controller.gridWindow ?? controller.window, let page = gridPage(for: window) { return page }
+        if let page = panelPage(for: controller) { return page }
+        return windows.values.first { $0.from.value === controller }?.page
+    }
+
+    /// Type text into the prompt of the agent in the page's tab, without
+    /// pressing Return, and give that terminal the keyboard so you can add
+    /// to it and send it.
+    @MainActor
+    func sendToAgent(_ text: String, from page: BrowserPage) {
+        guard let controller = owner(of: page) ?? frontController else { return }
+        let surface = controller.surfaceTree.first { $0.programStatus != nil } ?? controller.focusedSurface
+        guard let surface, let model = surface.surfaceModel else { return }
+        model.sendText(text)
+        controller.window?.makeKeyAndOrderFront(nil)
+        controller.focusSurface(surface)
     }
 
     func remember(url: String) {

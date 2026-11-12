@@ -44,6 +44,18 @@ final class BrowserPage: ObservableObject {
     @Published private(set) var agentActive = false
     private var agentIdle: DispatchWorkItem?
 
+    /// The page's Chrome DevTools Protocol target id: what an agent's
+    /// connection is limited to (see kinterm-browser-mcp.mjs). Changes when
+    /// the page reopens after a move.
+    private(set) var targetID: String?
+
+    /// Whether the toolbar's address field has the keyboard.
+    var addressFocused = false
+
+    /// Whether you're picking elements to send to the agent.
+    @Published private(set) var picking = false
+    private var pickNonce: String?
+
     private var handle: UnsafeMutableRawPointer?
     private var closed = false
 
@@ -185,7 +197,47 @@ final class BrowserPage: ObservableObject {
         closeDevTools()
         if let handle { BrowserEngine.close(handle) }
         handle = nil
+        targetID = nil
+        stopPicking()
         if docked { devTools = .docked }
+    }
+
+    // MARK: Picking elements
+
+    /// Start picking elements on the page for the tab's agent, or stop.
+    func togglePicker() {
+        guard let handle else { return }
+        if picking {
+            BrowserEngine.execute(handle, ElementPicker.cancelScript)
+            stopPicking()
+            return
+        }
+        let nonce = UUID().uuidString
+        pickNonce = nonce
+        picking = true
+        BrowserEngine.execute(handle, ElementPicker.startScript(nonce: nonce))
+        focus()
+    }
+
+    private func stopPicking() {
+        picking = false
+        pickNonce = nil
+    }
+
+    private func picked(_ value: String) {
+        guard let nonce = pickNonce, value.hasPrefix(nonce + ":") else { return }
+        let json = Data(value.dropFirst(nonce.count + 1).utf8)
+        stopPicking()
+        guard let message = try? JSONDecoder().decode(ElementPicker.Message.self, from: json),
+              message.type == "pick", let elements = message.elements, !elements.isEmpty else { return }
+        BrowserCenter.shared.sendToAgent(
+            ElementPicker.prompt(for: elements, url: message.url ?? url), from: self)
+    }
+
+    /// ⌘C, ⌘V and the like, in the page.
+    func edit(_ command: BrowserEngine.Edit) {
+        guard let handle else { return }
+        BrowserEngine.edit(handle, command)
     }
 
     func toggleDevTools() {
@@ -204,6 +256,8 @@ final class BrowserPage: ObservableObject {
         closed = true
         if let handle { BrowserEngine.close(handle) }
         handle = nil
+        targetID = nil
+        stopPicking()
         devTools = nil
         container.page = nil
         devToolsContainer.page = nil
@@ -226,6 +280,8 @@ final class BrowserPage: ObservableObject {
             canGoForward = b & 2 != 0
             if isLoading {
                 problem = nil
+                // A new document: the picker went with the old one.
+                if picking { stopPicking() }
             } else {
                 if agentActive { installAgentCursor() }
                 // DevTools docked before a move: back, on the new page.
@@ -233,6 +289,8 @@ final class BrowserPage: ObservableObject {
             }
         case 4:
             handle = nil
+            targetID = nil
+            stopPicking()
             devTools = nil
         case 7:
             // The DevTools window was closed.
@@ -244,6 +302,10 @@ final class BrowserPage: ObservableObject {
             }
         case 6:
             problem = value.map { Self.describe(loadError: $0) }
+        case 8:
+            targetID = value
+        case 9:
+            if let value { picked(value) }
         default:
             break
         }
@@ -315,7 +377,7 @@ private func ignoreBrowserEvent(
 
 /// The view a page's Chromium view lives in.
 final class BrowserContainerView: NSView {
-    fileprivate weak var page: BrowserPage?
+    fileprivate(set) weak var page: BrowserPage?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)

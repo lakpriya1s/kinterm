@@ -48,6 +48,7 @@ struct BrowserView: View {
         .background(ReviewColors.background)
         .onAppear { address = page.url }
         .onChange(of: page.url) { url in if !editing { address = url } }
+        .onChange(of: addressFocused) { page.addressFocused = $0 }
         .onReceive(NotificationCenter.default.publisher(for: .browserFocusAddress)) { note in
             guard (note.object as? BrowserPage) === page else { return }
             addressFocused = true
@@ -118,6 +119,13 @@ struct BrowserView: View {
             }
 
             BrowserButton(
+                symbol: page.picking ? "scope" : "cursorarrow.rays",
+                help: page.picking
+                    ? "Stop Picking (Esc)"
+                    : "Pick Elements for the Agent: click one to send it to this tab's agent, ⇧-click to pick several",
+                active: page.picking
+            ) { page.togglePicker() }
+            BrowserButton(
                 symbol: page.devTools == nil ? "hammer" : "hammer.fill",
                 help: page.devTools == nil ? "DevTools: Elements, Console, Network… (⌥⌘I)" : "Close DevTools (⌥⌘I)"
             ) { page.toggleDevTools() }
@@ -129,7 +137,7 @@ struct BrowserView: View {
                 if let popOut {
                     BrowserButton(symbol: "macwindow.on.rectangle", help: "Open in Its Own Window", action: popOut)
                 }
-                BrowserButton(symbol: "sidebar.trailing", help: "Hide Browser (⌘⇧B)", action: close)
+                BrowserButton(symbol: "xmark.circle", help: "Close Browser (⌘⇧B)", action: close)
             case .window:
                 if let popOut {
                     BrowserButton(symbol: "sidebar.trailing", help: "Put Back Beside the Terminal", action: popOut)
@@ -255,6 +263,8 @@ struct BrowserButton: View {
     let symbol: String
     let help: String
     var enabled = true
+    /// On, like a mode that's in use.
+    var active = false
     let action: () -> Void
 
     @State private var hovering = false
@@ -263,9 +273,11 @@ struct BrowserButton: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(enabled ? (hovering ? ReviewColors.text : ReviewColors.secondary) : ReviewColors.secondary.opacity(0.4))
+                .foregroundColor(active ? ReviewColors.accent
+                    : enabled ? (hovering ? ReviewColors.text : ReviewColors.secondary) : ReviewColors.secondary.opacity(0.4))
                 .frame(width: 24, height: 24)
-                .background(RoundedRectangle(cornerRadius: 5).fill(hovering && enabled ? ReviewColors.hovered : .clear))
+                .background(RoundedRectangle(cornerRadius: 5).fill(
+                    active ? ReviewColors.accent.opacity(0.18) : hovering && enabled ? ReviewColors.hovered : .clear))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

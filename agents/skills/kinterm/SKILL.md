@@ -19,13 +19,21 @@ kinterm-browser status               # what's open
 ```
 
 `kinterm-browser` is on the PATH of every KinTerm terminal. Opening the
-browser doesn't take the keyboard from the user.
+browser doesn't take the keyboard from the user. The browser is your tab's:
+it opens beside the terminal you run in, and the MCP tools only see that
+page, never another tab's.
 
 If the `kinterm-browser` MCP server is connected, use its tools to check
 your change works instead of assuming it does: navigate, take a snapshot,
 click and fill like a user, then read the console messages and network
 requests for errors. The user sees a blue glow and your cursor while you
 do. Prefer the snapshot (it's text) over screenshots.
+
+The user can pick elements on the page and send them to you; they arrive
+as a message starting "Selected element in the browser", with a CSS
+selector, the element's HTML and text, and for React development builds
+the component and its source file. Find that code and act on what they
+ask about it.
 
 After a UI change, check at least: the page loads, there are no new console
 errors, and the thing you changed works when clicked.

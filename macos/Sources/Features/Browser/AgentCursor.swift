@@ -2,10 +2,12 @@
 /// doing: an arrow that glides to where it moves the mouse, a ripple where
 /// it clicks, and a ring around the field it types into.
 ///
-/// Agents' input reaches the page as real mouse and key events, so the
-/// script follows those. It only draws while KinTerm says an agent is
-/// active (`window.__kintermAgent(true)`); the rest of the time it just
-/// remembers where the mouse is. Everything it draws is in a closed shadow
+/// It follows the agent's mouse, not yours: the agent's MCP server
+/// (kinterm-browser-mcp.mjs) sees each mouse event the agent sends and
+/// tells the page first (`window.__kintermAgentPointer(x, y, type)`), in
+/// order on the same connection. Your own mouse keeps its own pointer. It
+/// only draws while KinTerm says an agent is active
+/// (`window.__kintermAgent(true)`). Everything it draws is in a closed shadow
 /// root that ignores the mouse and is hidden from accessibility, and it's
 /// removed when the agent finishes.
 enum AgentCursor {
@@ -69,11 +71,22 @@ enum AgentCursor {
         setTimeout(() => { r.style.opacity = '0'; setTimeout(() => r.remove(), 400); }, 900);
       }
 
+      // When the agent last pressed the mouse, and when you did: focus
+      // that follows your click is yours, not the agent's.
+      let agentPressAt = 0, userPressAt = 0;
+
+      window.__kintermAgentPointer = (px, py, type) => {
+        if (type === 'mousePressed') agentPressAt = Date.now();
+        if (!active) { x = px; y = py; return; }
+        ensure();
+        move(px, py);
+        if (type === 'mousePressed') ripple(px, py);
+      };
+
       const opts = { capture: true, passive: true };
-      addEventListener('mousemove', e => { if (active) move(e.clientX, e.clientY); else { x = e.clientX; y = e.clientY; } }, opts);
-      addEventListener('mousedown', e => { if (!active) return; move(e.clientX, e.clientY); ripple(e.clientX, e.clientY); }, opts);
+      addEventListener('mousedown', () => { if (Date.now() - agentPressAt > 400) userPressAt = Date.now(); }, opts);
       addEventListener('focusin', e => {
-        if (!active) return;
+        if (!active || Date.now() - userPressAt < 600) return;
         const el = e.target;
         if (el && el.matches && el.matches('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) {
           const box = el.getBoundingClientRect();

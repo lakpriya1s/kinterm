@@ -30,11 +30,16 @@ enum BrowserEngine {
         let showDevTools: HandleFn
         let execute: ExecuteFn
         let closeDevTools: HandleFn
+        /// Missing from a module older than this KinTerm.
+        let edit: HandleIntFn?
         let close: HandleFn
         let shutdown: VoidFn
     }
 
     enum Command: Int32 { case back = 0, forward, reload, stop, hardReload }
+
+    /// Edit commands, in the page's focused frame.
+    enum Edit: Int32 { case undo = 0, redo, cut, copy, paste, selectAll }
 
     enum Failure: LocalizedError {
         case notInstalled
@@ -141,7 +146,7 @@ enum BrowserEngine {
         api = API(
             initialize: initialize, create: create, navigate: navigate, command: command,
             setFocus: setFocus, showDevTools: showDevTools, execute: execute, closeDevTools: closeDevTools,
-            close: close, shutdown: shutdown)
+            edit: symbol("kt_browser_edit", HandleIntFn.self), close: close, shutdown: shutdown)
         isRunning = true
 
         // Chromium's processes end with KinTerm.
@@ -181,6 +186,10 @@ enum BrowserEngine {
     /// Run JavaScript in the page's main frame.
     static func execute(_ handle: UnsafeMutableRawPointer, _ code: String) {
         api?.execute(handle, code)
+    }
+
+    static func edit(_ handle: UnsafeMutableRawPointer, _ command: Edit) {
+        api?.edit?(handle, command.rawValue)
     }
 
     static func closeDevTools(_ handle: UnsafeMutableRawPointer) {

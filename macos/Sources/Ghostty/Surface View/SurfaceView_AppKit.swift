@@ -384,7 +384,10 @@ extension Ghostty {
             ) { [weak self] event in self?.localEventHandler(event) }
 
             // Setup our surface. This will also initialize all the terminal IO.
-            let surface_cfg = baseConfig ?? SurfaceConfiguration()
+            var surface_cfg = baseConfig ?? SurfaceConfiguration()
+            // Which terminal a program runs in, so KinTerm's tools (the
+            // browser's CLI and MCP server) act on its own tab.
+            surface_cfg.environmentVariables["KINTERM_SURFACE_ID"] = id.uuidString
             let surface = surface_cfg.withCValue(view: self) { surface_cfg_c in
                 ghostty_surface_new(app, &surface_cfg_c)
             }
@@ -1342,6 +1345,11 @@ extension Ghostty {
             if !focused {
                 return false
             }
+
+            // Also only while we have the keyboard: another view in the window
+            // (the browser, a text field) may have it while our focus state
+            // hasn't caught up, and its ⌘V must not paste here.
+            guard window?.firstResponder === self else { return false }
 
             // Get information about if this is a binding.
             let bindingFlags = surfaceModel.flatMap { surface in

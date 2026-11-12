@@ -34,7 +34,13 @@ request() {
     echo "kinterm-browser: KinTerm isn't running (no socket at $KINTERM_BROWSER_SOCKET)." >&2
     exit 1
   fi
-  printf '%s\n' "$1" | nc -U "$KINTERM_BROWSER_SOCKET"
+  body=$1
+  # From a KinTerm terminal: act on that terminal's tab's browser.
+  case "${KINTERM_SURFACE_ID:-}" in
+    *[!0-9A-Fa-f-]* | "") ;;
+    *) body="{\"surface\":\"$KINTERM_SURFACE_ID\",${body#\{}" ;;
+  esac
+  printf '%s\n' "$body" | nc -U "$KINTERM_BROWSER_SOCKET"
 }
 
 json_string() {

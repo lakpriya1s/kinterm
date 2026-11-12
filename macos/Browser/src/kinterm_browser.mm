@@ -20,6 +20,8 @@
 #include "include/cef_application_mac.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
+#include "include/cef_devtools_message_observer.h"
+#include "include/cef_parser.h"
 #include "include/wrapper/cef_library_loader.h"
 
 #define KT_EXPORT extern "C" __attribute__((visibility("default")))
@@ -34,7 +36,56 @@ enum {
   KT_EVENT_CONSOLE_ERROR = 5,  // value: the message
   KT_EVENT_LOAD_ERROR = 6,     // value: the error text, a: the error code
   KT_EVENT_DEVTOOLS = 7,       // a: DevTools open
+  KT_EVENT_TARGET = 8,         // value: the page's DevTools target id
+  KT_EVENT_PICK = 9,           // value: a message from KinTerm's element picker
 };
+
+// Console messages starting with this are from KinTerm's element picker
+// (see ElementPicker.swift), not the page's own: they go to KinTerm and
+// not to the console.
+static const char kPickPrefix[] = "__kintermPick:";
+
+// Edit commands, see kt_browser_edit.
+enum { KT_EDIT_UNDO = 0, KT_EDIT_REDO, KT_EDIT_CUT, KT_EDIT_COPY, KT_EDIT_PASTE, KT_EDIT_SELECT_ALL };
+
+static void RunEdit(CefRefPtr<CefBrowser> browser, int command) {
+  if (!browser) return;
+  CefRefPtr<CefFrame> frame = browser->GetFocusedFrame();
+  if (!frame) frame = browser->GetMainFrame();
+  if (!frame) return;
+  switch (command) {
+    case KT_EDIT_UNDO: frame->Undo(); break;
+    case KT_EDIT_REDO: frame->Redo(); break;
+    case KT_EDIT_CUT: frame->Cut(); break;
+    case KT_EDIT_COPY: frame->Copy(); break;
+    case KT_EDIT_PASTE: frame->Paste(); break;
+    case KT_EDIT_SELECT_ALL: frame->SelectAll(); break;
+  }
+}
+
+// The edit command a ⌘ key is, or -1. Edit shortcuts are handled here, not
+// through the menu: KinTerm's Edit menu belongs to the terminal (its
+// shortcuts follow the terminal's keybindings), so ⌘V in a page must not
+// depend on it.
+static int EditCommandForKey(const CefKeyEvent& event, NSEvent* ns_event) {
+  if (event.type != KEYEVENT_RAWKEYDOWN) return -1;
+  uint32_t mods = event.modifiers & (EVENTFLAG_COMMAND_DOWN | EVENTFLAG_SHIFT_DOWN | EVENTFLAG_CONTROL_DOWN |
+                                     EVENTFLAG_ALT_DOWN);
+  NSString* key = ns_event.charactersIgnoringModifiers.lowercaseString;
+  if (key.length != 1) return -1;
+  unichar c = [key characterAtIndex:0];
+  if (mods == EVENTFLAG_COMMAND_DOWN) {
+    switch (c) {
+      case 'z': return KT_EDIT_UNDO;
+      case 'x': return KT_EDIT_CUT;
+      case 'c': return KT_EDIT_COPY;
+      case 'v': return KT_EDIT_PASTE;
+      case 'a': return KT_EDIT_SELECT_ALL;
+    }
+  }
+  if (mods == (EVENTFLAG_COMMAND_DOWN | EVENTFLAG_SHIFT_DOWN) && c == 'z') return KT_EDIT_REDO;
+  return -1;
+}
 
 typedef void (*kt_event_fn)(void* context, int kind, const char* value, int a, int b);
 
@@ -165,11 +216,21 @@ class KTApp : public CefApp, public CefBrowserProcessHandler {
 
 // The DevTools of a page, in a view KinTerm gives it (docked) or a window
 // of its own. Tells the page's client when it closes.
-class KTDevToolsClient : public CefClient, public CefLifeSpanHandler {
+class KTDevToolsClient : public CefClient, public CefLifeSpanHandler, public CefKeyboardHandler {
  public:
   explicit KTDevToolsClient(std::function<void()> closed) : closed_(std::move(closed)) {}
 
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+  CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
+
+  bool OnPreKeyEvent(CefRefPtr<CefBrowser> browser, const CefKeyEvent& event, CefEventHandle os_event,
+                     bool* is_keyboard_shortcut) override {
+    if (!os_event) return false;
+    int edit = EditCommandForKey(event, CAST_CEF_EVENT_HANDLE_TO_NSEVENT(os_event));
+    if (edit < 0) return false;
+    RunEdit(browser, edit);
+    return true;
+  }
 
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
     g_open_browsers++;
@@ -199,7 +260,8 @@ class KTClient : public CefClient,
                  public CefDisplayHandler,
                  public CefLifeSpanHandler,
                  public CefLoadHandler,
-                 public CefKeyboardHandler {
+                 public CefKeyboardHandler,
+                 public CefDevToolsMessageObserver {
  public:
   KTClient(kt_event_fn fn, void* context, std::string pending_url)
       : fn_(fn), context_(context), pending_url_(std::move(pending_url)) {}
@@ -248,8 +310,26 @@ class KTClient : public CefClient,
     }
   }
 
+  void Edit(int command) { RunEdit(browser_, command); }
+
+  // Ask for the page's DevTools target id, so agents can be given this
+  // page and no other (see kinterm-browser-mcp.mjs). Right after the
+  // browser is made DevTools may not answer yet; asked again after each
+  // load until it does.
+  void RequestTargetId() {
+    if (!browser_ || has_target_id_) return;
+    if (!devtools_observer_) devtools_observer_ = browser_->GetHost()->AddDevToolsMessageObserver(this);
+    // Our own message id: the result can arrive before this returns.
+    static int next_id = 0x4b540000;
+    target_info_id_ = ++next_id;
+    if (browser_->GetHost()->ExecuteDevToolsMethod(target_info_id_, "Target.getTargetInfo", nullptr) == 0) {
+      target_info_id_ = -1;
+    }
+  }
+
   void Close() {
     closing_ = true;
+    devtools_observer_ = nullptr;
     if (browser_) browser_->GetHost()->CloseBrowser(true);
   }
 
@@ -262,6 +342,7 @@ class KTClient : public CefClient,
     view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     if (view.superview) view.frame = view.superview.bounds;
     Emit(KT_EVENT_CREATED, nullptr, browser->GetIdentifier(), 0);
+    RequestTargetId();
     if (closing_) {
       browser->GetHost()->CloseBrowser(true);
     } else if (!pending_url_.empty() && pending_url_ != browser->GetMainFrame()->GetURL().ToString()) {
@@ -293,6 +374,8 @@ class KTClient : public CefClient,
 
   void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
     if (browser_ && browser_->IsSame(browser)) {
+      // The registration holds this client; let it go.
+      devtools_observer_ = nullptr;
       browser_ = nullptr;
       g_open_browsers = std::max(0, g_open_browsers - 1);
       Emit(KT_EVENT_CLOSED, nullptr, 0, 0);
@@ -312,6 +395,11 @@ class KTClient : public CefClient,
 
   bool OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t level,
                         const CefString& message, const CefString& source, int line) override {
+    std::string text = message.ToString();
+    if (text.rfind(kPickPrefix, 0) == 0) {
+      Emit(KT_EVENT_PICK, text.c_str() + sizeof(kPickPrefix) - 1, 0, 0);
+      return true;
+    }
     if (level >= LOGSEVERITY_ERROR) Emit(KT_EVENT_CONSOLE_ERROR, message.ToString().c_str(), line, 0);
     return false;
   }
@@ -321,6 +409,7 @@ class KTClient : public CefClient,
   void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack,
                             bool canGoForward) override {
     Emit(KT_EVENT_LOADING, nullptr, isLoading ? 1 : 0, (canGoBack ? 1 : 0) | (canGoForward ? 2 : 0));
+    if (!isLoading) RequestTargetId();
   }
 
   void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, ErrorCode errorCode,
@@ -333,11 +422,34 @@ class KTClient : public CefClient,
 
   bool OnPreKeyEvent(CefRefPtr<CefBrowser> browser, const CefKeyEvent& event, CefEventHandle os_event,
                      bool* is_keyboard_shortcut) override {
-    // ⌘ shortcuts go to KinTerm's menus first (⌘W, ⌘T, grid and browser
-    // items), like they do everywhere else in the app. Edit items (copy,
-    // paste, undo) reach the page through the responder chain.
     if (!os_event || event.type != KEYEVENT_RAWKEYDOWN || !(event.modifiers & EVENTFLAG_COMMAND_DOWN)) return false;
-    return [[NSApp mainMenu] performKeyEquivalent:CAST_CEF_EVENT_HANDLE_TO_NSEVENT(os_event)];
+    NSEvent* ns_event = CAST_CEF_EVENT_HANDLE_TO_NSEVENT(os_event);
+    // Edit shortcuts (⌘C, ⌘V, ⌘A…) act on the page directly.
+    int edit = EditCommandForKey(event, ns_event);
+    if (edit >= 0) {
+      RunEdit(browser, edit);
+      return true;
+    }
+    // Other ⌘ shortcuts go to KinTerm's menus first (⌘W, ⌘T, grid and
+    // browser items), like they do everywhere else in the app.
+    return [[NSApp mainMenu] performKeyEquivalent:ns_event];
+  }
+
+  // CefDevToolsMessageObserver
+
+  void OnDevToolsMethodResult(CefRefPtr<CefBrowser> browser, int message_id, bool success, const void* result,
+                              size_t result_size) override {
+    if (message_id != target_info_id_) return;
+    target_info_id_ = -1;
+    if (!success || !result) return;
+    CefRefPtr<CefValue> value = CefParseJSON(result, result_size, JSON_PARSER_RFC);
+    if (!value || value->GetType() != VTYPE_DICTIONARY) return;
+    CefRefPtr<CefDictionaryValue> info = value->GetDictionary()->GetDictionary("targetInfo");
+    if (!info) return;
+    std::string id = info->GetString("targetId").ToString();
+    if (id.empty()) return;
+    has_target_id_ = true;
+    Emit(KT_EVENT_TARGET, id.c_str(), 0, 0);
   }
 
  private:
@@ -351,6 +463,9 @@ class KTClient : public CefClient,
   bool closing_ = false;
   CefRefPtr<CefBrowser> browser_;
   CefRefPtr<KTDevToolsClient> devtools_;
+  CefRefPtr<CefRegistration> devtools_observer_;
+  int target_info_id_ = -1;
+  bool has_target_id_ = false;
 
   IMPLEMENT_REFCOUNTING(KTClient);
 };
@@ -467,6 +582,14 @@ KT_EXPORT void kt_browser_execute_js(void* handle, const char* code) {
   auto frame = client->browser()->GetMainFrame();
   frame->ExecuteJavaScript(code, frame->GetURL(), 0);
   ScheduleWork(0);
+}
+
+// 0 undo, 1 redo, 2 cut, 3 copy, 4 paste, 5 select all, in the focused frame.
+KT_EXPORT void kt_browser_edit(void* handle, int command) {
+  if (auto* client = AsClient(handle)) {
+    client->Edit(command);
+    ScheduleWork(0);
+  }
 }
 
 KT_EXPORT void kt_browser_close_devtools(void* handle) {

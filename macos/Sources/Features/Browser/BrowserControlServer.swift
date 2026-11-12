@@ -10,6 +10,13 @@ import Darwin
 /// "back" | "forward" | "devtools" | "window", "url": "…"}`, and `{"cmd": "agent",
 /// "active": true | false}` around an agent's tool calls, which shows its
 /// cursor on the page.
+///
+/// Each may say which terminal it's from, `"surface": "<KINTERM_SURFACE_ID>"`:
+/// then it acts on that terminal's tab's browser and no other, so an agent
+/// in one tab never gets another tab's page. Without it (a shell outside
+/// KinTerm, an agent that doesn't pass its environment on), the tab you're
+/// looking at. `open`/`start` reply with the page's DevTools target id
+/// (`"target"`), which the MCP server limits the agent to.
 final class BrowserControlServer {
     static let shared = BrowserControlServer()
 
@@ -110,13 +117,24 @@ final class BrowserControlServer {
             "port": Int(BrowserEngine.debugPort),
         ]
 
+        // The caller's tab: the terminal it runs in, else the one in front.
+        let surfaceID = request["surface"] as? String
+        let fromSurface = surfaceID.flatMap { center.controller(forSurface: $0) }
+        if surfaceID != nil, fromSurface == nil, request["cmd"] as? String != "status" {
+            reply["ok"] = false
+            reply["error"] = "The terminal this came from is closed."
+            return reply
+        }
+        let tab = fromSurface ?? center.frontController
+
         func page(opening: Bool) -> BrowserPage? {
-            guard let controller = center.frontController else { return nil }
-            if let window = controller.gridWindow ?? controller.window, let page = center.gridPage(for: window) {
+            guard let controller = tab else { return nil }
+            if let page = center.page(for: controller) {
                 if let url { page.load(url) }
                 return page
             }
-            if let page = center.panelPage(for: controller) ?? center.windowedPage {
+            // Without a terminal to go by, a browser in its own window will do.
+            if fromSurface == nil, let page = center.windowedPage {
                 if let url { page.load(url) }
                 return page
             }
@@ -141,9 +159,11 @@ final class BrowserControlServer {
             if case .failure(let failure) = BrowserEngine.start() { return fail(failure.localizedDescription) }
             guard let page = page(opening: true) else { return fail("Open a KinTerm window first.") }
             reply["url"] = page.url
+            // Null while the page is still opening; ask again.
+            reply["target"] = page.targetID ?? NSNull()
 
         case "close":
-            guard let controller = center.frontController else { return fail("No KinTerm window is open.") }
+            guard let controller = tab else { return fail("No KinTerm window is open.") }
             if let window = controller.gridWindow ?? controller.window, center.gridPage(for: window) != nil {
                 center.closeGridTile(in: window)
             } else {
@@ -152,7 +172,13 @@ final class BrowserControlServer {
 
         case "agent":
             let active = request["active"] as? Bool ?? false
-            center.allPages.forEach { $0.agentActivity(active) }
+            // Only the agent's own page shows it working.
+            if let target = request["target"] as? String,
+               let page = center.allPages.first(where: { $0.targetID == target }) {
+                page.agentActivity(active)
+            } else if let controller = tab, let page = center.page(for: controller) {
+                page.agentActivity(active)
+            }
 
         case "window":
             guard let page = page(opening: false) else { return fail("No browser is open. Run: kinterm-browser open") }
