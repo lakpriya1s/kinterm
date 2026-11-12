@@ -92,7 +92,7 @@ final class TerminalGridModel: NSObject, ObservableObject, NSMenuItemValidation 
 
     /// The object that identifies a window's tabs: its tab group, or the
     /// window itself when it can't have tabs.
-    private static func groupObject(for window: NSWindow) -> AnyObject {
+    static func groupObject(for window: NSWindow) -> AnyObject {
         window.tabGroup ?? window
     }
 

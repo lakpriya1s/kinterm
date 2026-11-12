@@ -14,10 +14,22 @@ struct TerminalGridView: View {
     /// The terminal with the keyboard, anywhere in the grid.
     let focusedSurface: Ghostty.SurfaceView?
 
+    /// Whether the grid has a review tile (⌘⇧R). See `ReviewCenter`.
+    @ObservedObject private var review = ReviewCenter.shared
+
     private static let gap: CGFloat = 6
 
+    /// A tile: a tab, or the review of one.
+    private enum Item: Hashable {
+        case tab(BaseTerminalController)
+        case review
+    }
+
     var body: some View {
-        let count = controllers.count
+        let window = controllers.first?.window
+        let reviewed = review.gridReviewController(for: window)
+        let items = controllers.map(Item.tab) + (reviewed == nil ? [] : [.review])
+        let count = items.count
         // As square as possible, wider than tall: 2 → 2×1, 3–4 → 2×2,
         // 5–6 → 3×2, 7–9 → 3×3.
         let columns = max(1, Int(Double(count).squareRoot().rounded(.up)))
@@ -26,17 +38,33 @@ struct TerminalGridView: View {
         VStack(spacing: Self.gap) {
             ForEach(0..<rows, id: \.self) { row in
                 HStack(spacing: Self.gap) {
-                    ForEach(controllers[(row * columns)..<min(count, (row + 1) * columns)], id: \.self) { controller in
-                        TerminalGridTile(
-                            controller: controller,
-                            tab: tab(for: controller),
-                            isFocused: focusedSurface.map { controller.surfaceTree.contains($0) } ?? false)
+                    ForEach(items[(row * columns)..<min(count, (row + 1) * columns)], id: \.self) { item in
+                        switch item {
+                        case .tab(let controller):
+                            TerminalGridTile(
+                                controller: controller,
+                                tab: tab(for: controller),
+                                isFocused: focusedSurface.map { controller.surfaceTree.contains($0) } ?? false)
+                        case .review:
+                            if let reviewed, let window {
+                                ReviewGridTile(
+                                    model: review.model(for: reviewed),
+                                    tab: tab(for: reviewed),
+                                    window: window)
+                            }
+                        }
                     }
                 }
             }
         }
         .padding(Self.gap)
         .background(AgentTabBarColors.bar)
+        .onChange(of: focusedSurface) { surface in
+            // The review tile reviews the agent tile you're in.
+            guard reviewed != nil, let window, let surface,
+                  let owner = BaseTerminalController.controller(owning: surface) else { return }
+            review.gridFocusChanged(to: owner, in: window)
+        }
     }
 
     private func tab(for controller: BaseTerminalController) -> AgentTab? {
@@ -92,6 +120,63 @@ private struct TerminalGridTile: View {
     private func expand() {
         guard let window = controller.window else { return }
         TerminalGridModel.shared.exit(for: window, selecting: controller)
+    }
+}
+
+/// The review tile (⌘⇧R): the changes of the agent tile you were last in.
+/// See `ReviewCenter`.
+private struct ReviewGridTile: View {
+    @ObservedObject var model: ReviewModel
+    let tab: AgentTab?
+    let window: NSWindow
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.badge.checkmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(AgentTabBarColors.cardTitle)
+                Text("Review")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(AgentTabBarColors.cardTitle)
+                if let color = tab?.color {
+                    Circle().fill(color).frame(width: 7, height: 7)
+                }
+                AgentTabFaceView(status: tab?.status)
+                Text(tab?.title ?? model.tabTitle)
+                    .font(.system(size: 11))
+                    .foregroundColor(AgentTabBarColors.cardMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 4)
+
+                Text("⌘⇧R")
+                    .font(.system(size: 10))
+                    .foregroundColor(AgentTabBarColors.cardMuted)
+                TerminalGridHeaderButton(symbol: "macwindow.on.rectangle", help: "Open Review in Its Own Window") {
+                    ReviewCenter.shared.popOutGridReview(for: window)
+                }
+                TerminalGridHeaderButton(symbol: "xmark", help: "Close Review (⌘⇧R)") {
+                    ReviewCenter.shared.closeGridReview(for: window)
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(AgentTabBarColors.card)
+            .help("Reviews the agent tile you were last in")
+
+            ReviewView(model: model, presentation: .tile, close: {
+                ReviewCenter.shared.closeGridReview(for: window)
+            })
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(AgentTabBarColors.border, lineWidth: 1)
+                .allowsHitTesting(false))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Review")
     }
 }
 

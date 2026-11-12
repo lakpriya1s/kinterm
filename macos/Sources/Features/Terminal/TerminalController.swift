@@ -1142,6 +1142,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         AgentLauncher.installShortcuts()
         AgentsPanel.installShortcuts()
         TerminalGridModel.shared.installMenuItem()
+        ReviewCenter.shared.installMenuItem()
 
         // If we have a default size, we want to apply it.
         if let defaultSize {
