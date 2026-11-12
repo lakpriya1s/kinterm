@@ -97,6 +97,17 @@ jobs:
             -Demit-macos-app=false \
             "-Dversion-string=$KINTERM_VERSION"
 
+      # Chromium for the browser, about 135 MB, cached by its version (in
+      # build.sh). Apple silicon only; the browser says so on Intel Macs.
+      - name: Cache Chromium (CEF)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: macos/Browser/.cef
+          key: cef-${{ runner.arch }}-${{ hashFiles('macos/Browser/build.sh') }}
+
+      - name: Build the browser
+        run: macos/Browser/build.sh
+
       - name: Build KinTerm.app
         run: |
           cd macos
@@ -135,7 +146,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CI_KEYCHAIN_PWD" build.keychain
           rm certificate.p12
 
-          # Sparkle's parts, then the dock tile plugin, then the app.
+          # Sparkle's parts, the dock tile plugin, the browser, then the app.
           sparkle="$APP/Contents/Frameworks/Sparkle.framework"
           for part in Versions/B/XPCServices/Downloader.xpc Versions/B/XPCServices/Installer.xpc \
             Versions/B/Autoupdate Versions/B/Updater.app; do
@@ -143,6 +154,7 @@ jobs:
           done
           /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "$sparkle"
           /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "$APP/Contents/PlugIns/DockTilePlugin.plugin"
+          macos/Browser/sign.sh "$APP" "$MACOS_CERTIFICATE_NAME"
           /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime --entitlements macos/Ghostty.entitlements "$APP"
 
       - name: Create DMG
