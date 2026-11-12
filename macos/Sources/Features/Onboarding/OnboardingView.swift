@@ -207,20 +207,28 @@ private struct OnboardingTabBar: View {
 private struct OnboardingClaude: View {
     @ObservedObject private var settings = AgentTabBarSettings.shared
 
-    @State private var folders: [URL] = []
-    @State private var chosen: Set<URL> = []
-    @State private var results: [URL: String] = [:]
-    @State private var installed: Set<URL> = []
+    /// An agent's config folder: one account.
+    struct Folder: Hashable {
+        let url: URL
+        let agent: AgentKind
+    }
+
+    @State private var folders: [Folder] = []
+    @State private var chosen: Set<Folder> = []
+    @State private var results: [Folder: String] = [:]
+    @State private var installed: Set<Folder> = []
     @State private var didInstall = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            OnboardingHeading(title: "Connect Claude Code", detail: "Each Claude folder is an account.")
+            OnboardingHeading(
+                title: "Connect Your Agents",
+                detail: "Claude Code and Codex. Each config folder is an account.")
 
             if folders.isEmpty {
                 OnboardingNote(
                     symbol: "questionmark.folder",
-                    text: "No Claude Code config yet. Run Claude Code once, then reopen KinTerm › Setup Assistant.")
+                    text: "No Claude Code or Codex config yet. Run one of them once, then reopen KinTerm › Setup Assistant.")
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
@@ -265,7 +273,7 @@ private struct OnboardingClaude: View {
         .onAppear(perform: load)
     }
 
-    private func row(for folder: URL) -> some View {
+    private func row(for folder: Folder) -> some View {
         let isInstalled = installed.contains(folder)
         return HStack(spacing: 12) {
             Toggle("", isOn: Binding(
@@ -274,9 +282,15 @@ private struct OnboardingClaude: View {
                 .toggleStyle(.checkbox)
                 .labelsHidden()
                 .disabled(isInstalled)
-            Text(AgentAccountStore.name(for: folder.lastPathComponent))
+            Text(folder.agent.displayName)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundColor(OnboardingColors.muted)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Capsule().strokeBorder(OnboardingColors.border))
+            Text(AgentAccountStore.name(for: folder.url.lastPathComponent))
                 .font(.system(size: 13, weight: .semibold))
-            Text((folder.path as NSString).abbreviatingWithTildeInPath)
+            Text((folder.url.path as NSString).abbreviatingWithTildeInPath)
                 .font(.system(size: 11.5, design: .monospaced))
                 .foregroundColor(OnboardingColors.muted)
             Spacer()
@@ -297,15 +311,17 @@ private struct OnboardingClaude: View {
     }
 
     private func load() {
-        folders = AgentAccountStore.claudeConfigFolders()
-        installed = Set(folders.filter(AgentHookInstaller.isInstalled(in:)))
+        folders = AgentKind.allCases.flatMap { agent in
+            AgentAccountStore.configFolders(for: agent).map { Folder(url: $0, agent: agent) }
+        }
+        installed = Set(folders.filter { AgentHookInstaller.isInstalled(in: $0.url, for: $0.agent) })
         chosen = Set(folders).subtracting(installed)
     }
 
     private func install() {
         for folder in chosen {
             do {
-                try AgentHookInstaller.install(into: folder)
+                try AgentHookInstaller.install(into: folder.url, for: folder.agent)
                 installed.insert(folder)
                 results[folder] = nil
             } catch {
@@ -352,7 +368,7 @@ private struct OnboardingTools: View {
             connectNote
 
             HStack(spacing: 12) {
-                OnboardingTip(keys: "⌥⌘1–9", text: "A Claude Code tab for an account, in a new git worktree if you like")
+                OnboardingTip(keys: "⌥⌘1–9", text: "A Claude Code or Codex tab for an account, in a new git worktree if you like")
                 OnboardingTip(keys: "Right-click", text: "A tab's color, or an account's")
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -367,10 +383,10 @@ extension OnboardingTools {
         case .idle, .working:
             OnboardingNote(
                 symbol: "sparkles",
-                text: "Connect Agents installs the KinTerm skill, so Claude Code knows about these, "
+                text: "Connect Agents installs the KinTerm skill, so Claude Code and Codex know about these, "
                     + (BrowserEngine.isInstalled
                         ? "and lets Claude Code and Codex drive the browser. Restart running agents after."
-                        : "for each Claude Code account. Restart running agents after."))
+                        : "for each Claude Code and Codex account. Restart running agents after."))
         case .done:
             let failed = connect.outcomes.filter { !$0.ok }
             OnboardingNote(
@@ -393,7 +409,10 @@ final class OnboardingConnect: ObservableObject {
     func run() {
         guard state != .working else { return }
         state = .working
-        BrowserAgentInstaller.connect(claudeFolders: BrowserAgentInstaller.claudeFolders) { [weak self] outcomes in
+        BrowserAgentInstaller.connect(
+            claudeFolders: BrowserAgentInstaller.claudeFolders,
+            codexFolders: BrowserAgentInstaller.codexFolders
+        ) { [weak self] outcomes in
             self?.outcomes = outcomes
             self?.state = .done
         }
@@ -674,7 +693,7 @@ private struct OnboardingDone: View {
         ("⌘⇧E", "All tabs in a grid"),
         ("⌘⇧R", "Review an agent's changes"),
         ("⌘⇧B", "Browser"),
-        ("⌥⌘1–9", "Claude Code tab for an account"),
+        ("⌥⌘1–9", "Agent tab for an account"),
     ]
 
     var body: some View {

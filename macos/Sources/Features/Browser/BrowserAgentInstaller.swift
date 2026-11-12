@@ -4,12 +4,12 @@ import AppKit
 /// Assistant's Connect Agents, or Browser Options › Let Agents Use the
 /// Browser…):
 /// - the KinTerm skill (agents/skills/kinterm/SKILL.md), into each Claude
-///   Code account's `skills/kinterm/`, which tells agents about the browser
-///   and Review Changes;
+///   Code and Codex account's `skills/kinterm/`, which tells agents about
+///   the browser and Review Changes;
 /// - the browser's MCP server: `kinterm-browser` is copied to
 ///   `~/.config/kinterm/browser/` (a path that stays put when KinTerm moves)
-///   and added to Claude Code, for each account, and to Codex, with their
-///   own `mcp add` commands.
+///   and added to each Claude Code and Codex account, with their own
+///   `mcp add` commands.
 enum BrowserAgentInstaller {
     static let serverName = "kinterm-browser"
 
@@ -38,13 +38,14 @@ enum BrowserAgentInstaller {
     /// and the skill.
     @MainActor
     static func updateInstalledCLI() {
-        let folders = claudeFolders
+        let folders = claudeFolders + codexFolders
+        let codex = codexFolders
         DispatchQueue.global(qos: .utility).async {
             if FileManager.default.fileExists(atPath: cliURL.path) { try? installCLI() }
             for folder in folders where isSkillInstalled(in: folder) { try? installSkill(into: folder) }
             // Added by an older KinTerm: Codex doesn't yet pass on which
             // terminal it runs in.
-            if codexNeedsSurfaceForwarding { _ = forwardSurfaceToCodex() }
+            for home in codex where codexNeedsSurfaceForwarding(home) { _ = forwardSurfaceToCodex(home) }
         }
     }
 
@@ -92,15 +93,21 @@ enum BrowserAgentInstaller {
 
     /// Claude Code config folders: ~/.claude and each account's.
     @MainActor
-    static var claudeFolders: [URL] {
+    static var claudeFolders: [URL] { folders(of: .claude) }
+
+    /// Codex homes: ~/.codex and each account's.
+    @MainActor
+    static var codexFolders: [URL] { folders(of: .codex) }
+
+    @MainActor
+    private static func folders(of agent: AgentKind) -> [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        var ids = [".claude"]
-        for account in AgentAccountStore.shared.accounts where !ids.contains(account.id) {
-            ids.append(account.id)
+        var urls = [home.appendingPathComponent(agent.folderPrefix)]
+        for account in AgentAccountStore.shared.accounts(of: agent) {
+            let url = account.folder.map { URL(fileURLWithPath: $0) } ?? home.appendingPathComponent(account.id)
+            if !urls.contains(where: { $0.standardizedFileURL == url.standardizedFileURL }) { urls.append(url) }
         }
-        return ids.map { home.appendingPathComponent($0) }.filter {
-            FileManager.default.fileExists(atPath: $0.path)
-        }
+        return urls.filter { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     // MARK: Connecting
@@ -108,23 +115,27 @@ enum BrowserAgentInstaller {
     @MainActor
     static func presentConnect() {
         let folders = claudeFolders
+        let codex = codexFolders
         let alert = NSAlert()
         alert.messageText = "Let agents use KinTerm's browser?"
         // The skill comes along: it's what tells agents the browser is there.
-        let accounts = folders.map { ($0.path as NSString).abbreviatingWithTildeInPath }.joined(separator: ", ")
+        let list = { (urls: [URL]) in
+            urls.isEmpty ? "no config folder yet"
+                : urls.map { ($0.path as NSString).abbreviatingWithTildeInPath }.joined(separator: ", ")
+        }
         alert.informativeText = """
-            Adds a "\(serverName)" MCP server to Claude Code (\(accounts.isEmpty ? "no config folder yet" : accounts)) \
-            and Codex, if they're installed. Agents can then open pages, click and type, and read the console, \
+            Adds a "\(serverName)" MCP server to Claude Code (\(list(folders))) and Codex (\(list(codex))), \
+            if they're installed. Agents can then open pages, click and type, and read the console, \
             network requests and performance of the browser in your KinTerm window.
 
-            It runs `claude mcp add` and `codex mcp add`. Remove it any time with `claude mcp remove \(serverName)`. \
-            Restart running agents to pick it up. Needs Node.js.
+            It runs `claude mcp add` and `codex mcp add`. Remove it any time with `claude mcp remove \(serverName)` \
+            or `codex mcp remove \(serverName)`. Restart running agents to pick it up. Needs Node.js.
             """
         alert.addButton(withTitle: "Add")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        connect(claudeFolders: folders) { report in
+        connect(claudeFolders: folders, codexFolders: codex) { report in
                 let done = NSAlert()
                 done.messageText = report.allSatisfy(\.ok) ? "Agents can use the browser" : "Some agents weren't set up"
                 done.informativeText = report.map { "\($0.ok ? "✓" : "✗") \($0.name): \($0.detail)" }
@@ -135,9 +146,9 @@ enum BrowserAgentInstaller {
 
     /// Install everything, off the main thread, then report on the main
     /// thread.
-    static func connect(claudeFolders: [URL], completion: @escaping ([Outcome]) -> Void) {
+    static func connect(claudeFolders: [URL], codexFolders: [URL], completion: @escaping ([Outcome]) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let report = connect(claudeFolders: claudeFolders)
+            let report = connect(claudeFolders: claudeFolders, codexFolders: codexFolders)
             DispatchQueue.main.async { completion(report) }
         }
     }
@@ -148,9 +159,9 @@ enum BrowserAgentInstaller {
         let detail: String
     }
 
-    private static func connect(claudeFolders: [URL]) -> [Outcome] {
+    private static func connect(claudeFolders: [URL], codexFolders: [URL]) -> [Outcome] {
         var outcomes: [Outcome] = []
-        for folder in claudeFolders {
+        for folder in claudeFolders + codexFolders {
             let name = "KinTerm skill (\((folder.path as NSString).abbreviatingWithTildeInPath))"
             do {
                 try installSkill(into: folder)
@@ -184,13 +195,17 @@ enum BrowserAgentInstaller {
         }
 
         if shell("command -v codex").status == 0 {
-            _ = shell("codex mcp remove \(serverName)")
-            let result = shell("codex mcp add \(serverName) --env \(socket) -- \(cli) mcp")
-            var detail = result.status == 0 ? "added" : result.output
-            if result.status == 0, !forwardSurfaceToCodex() {
-                detail = "added; update Codex so each agent gets its own tab's browser"
+            for folder in codexFolders.isEmpty ? [nil] : codexFolders.map(Optional.some) {
+                let env = folder.map { "CODEX_HOME=\(shellQuote($0.path)) " } ?? ""
+                _ = shell("\(env)codex mcp remove \(serverName)")
+                let result = shell("\(env)codex mcp add \(serverName) --env \(socket) -- \(cli) mcp")
+                var detail = result.status == 0 ? "added" : result.output
+                if result.status == 0, let folder, !forwardSurfaceToCodex(folder) {
+                    detail = "added; update Codex so each agent gets its own tab's browser"
+                }
+                let name = "Codex" + (folder.map { " (\(($0.path as NSString).abbreviatingWithTildeInPath))" } ?? "")
+                outcomes.append(Outcome(name: name, ok: result.status == 0, detail: detail))
             }
-            outcomes.append(Outcome(name: "Codex", ok: result.status == 0, detail: detail))
         } else {
             outcomes.append(Outcome(name: "Codex", ok: true, detail: "not installed, skipped"))
         }
@@ -206,11 +221,8 @@ enum BrowserAgentInstaller {
     /// agent in another KinTerm (a debug build) would reach this one.
     private static let codexForwardedVariables = ["KINTERM_SURFACE_ID", "KINTERM_SOCKET"]
 
-    private static var codexConfigURL: URL {
-        let home = ProcessInfo.processInfo.environment["CODEX_HOME"].flatMap { $0.isEmpty ? nil : $0 }
-            .map { URL(fileURLWithPath: $0) }
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
-        return home.appendingPathComponent("config.toml")
+    private static func codexConfigURL(_ home: URL) -> URL {
+        home.appendingPathComponent("config.toml")
     }
 
     private static var codexEnvVarsLine: String {
@@ -236,8 +248,8 @@ enum BrowserAgentInstaller {
 
     /// Whether Codex has the browser's MCP server but doesn't forward the
     /// terminal to it.
-    static var codexNeedsSurfaceForwarding: Bool {
-        guard let text = try? String(contentsOf: codexConfigURL, encoding: .utf8),
+    static func codexNeedsSurfaceForwarding(_ home: URL) -> Bool {
+        guard let text = try? String(contentsOf: codexConfigURL(home), encoding: .utf8),
               let table = codexServerTable(in: text.components(separatedBy: "\n")) else { return false }
         return !table.forwards
     }
@@ -246,8 +258,8 @@ enum BrowserAgentInstaller {
     /// browser's MCP server (its `env_vars`). If this Codex doesn't understand that, its config
     /// is put back as it was. Returns whether Codex now forwards it.
     @discardableResult
-    static func forwardSurfaceToCodex() -> Bool {
-        let url = codexConfigURL
+    static func forwardSurfaceToCodex(_ home: URL) -> Bool {
+        let url = codexConfigURL(home)
         guard let original = try? String(contentsOf: url, encoding: .utf8) else { return false }
         var lines = original.components(separatedBy: "\n")
         guard let table = codexServerTable(in: lines) else { return false }
@@ -265,7 +277,7 @@ enum BrowserAgentInstaller {
             return false
         }
         // An older Codex rejects keys it doesn't know; it must still start.
-        if shell("codex mcp get \(serverName)").status == 0 { return true }
+        if shell("CODEX_HOME=\(shellQuote(home.path)) codex mcp get \(serverName)").status == 0 { return true }
         try? original.write(to: url, atomically: true, encoding: .utf8)
         return false
     }

@@ -363,7 +363,7 @@ final class AgentTabBarModel: ObservableObject {
             let tabController = tabWindow.windowController as? BaseTerminalController
             let status = tabController?.programStatus
             let account = status.flatMap { $0.state == .clear ? nil : $0.account }
-                .map { AgentAccountStore.shared.account(for: $0) }
+                .map { AgentAccountStore.shared.account(for: $0, app: status?.app) }
             return AgentTab(
                 id: ObjectIdentifier(tabWindow),
                 title: tabWindow.title,
@@ -1086,7 +1086,7 @@ private struct AgentTabCard: View {
     private var footer: String {
         let pwd = tab.pwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
         guard let status else { return ["No account", pwd, tab.branch].compactMap { $0 }.joined(separator: " · ") }
-        let who = tab.account?.name ?? status.appDisplayName
+        let who = tab.account?.label ?? status.appDisplayName
         return [who, pwd ?? status.title, tab.branch].compactMap { $0 }.joined(separator: " · ")
     }
 

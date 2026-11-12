@@ -47,7 +47,7 @@ struct AgentRow: Identifiable {
                 location: (["Window \(windowNumber) · tab \(tabNumber)"]
                     + [AgentGitBranch.shared.branch(at: controller.focusedSurface?.pwd)].compactMap { $0 })
                     .joined(separator: " · "),
-                account: status.account.map { AgentAccountStore.shared.account(for: $0) })
+                account: status.account.map { AgentAccountStore.shared.account(for: $0, app: status.app) })
             rows.append((row, (windowNumber, tabNumber)))
         }
         return rows
@@ -135,7 +135,7 @@ final class AgentsPanelModel: ObservableObject {
         return rows.filter { row in
             guard filter.matches(row) else { return false }
             guard !query.isEmpty else { return true }
-            return [row.title, row.doing, row.location, row.account?.name ?? "", row.status.stateLabel]
+            return [row.title, row.doing, row.location, row.account?.label ?? row.status.appDisplayName, row.status.stateLabel]
                 .contains { $0.lowercased().contains(query) }
         }
     }
@@ -325,7 +325,7 @@ private struct AgentsPanelRow: View {
                     RoundedRectangle(cornerRadius: 2, style: .continuous)
                         .fill(row.account?.swiftUIColor ?? AgentTabBarColors.shellAccount)
                         .frame(width: 3, height: 14)
-                    Text(row.account?.name ?? row.status.appDisplayName)
+                    Text(row.account?.label ?? row.status.appDisplayName)
                         .lineLimit(1)
                 }
                 .font(.system(size: 13))

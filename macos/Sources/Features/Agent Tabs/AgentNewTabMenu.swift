@@ -2,10 +2,12 @@ import AppKit
 import SwiftUI
 
 // The menu the tab bar's "+" opens: new tab, new split, a new Claude Code
-// tab per account, and options. See scope/designs/03-new-tab-menu.md.
+// or Codex tab per account, and options. See
+// scope/designs/03-new-tab-menu.md.
 
-/// Opens agent tabs: a new tab running `claude` with an account's
-/// `CLAUDE_CONFIG_DIR`, optionally in a new git worktree.
+/// Opens agent tabs: a new tab running the account's agent (`claude` with
+/// its `CLAUDE_CONFIG_DIR`, `codex` with its `CODEX_HOME`), optionally in a
+/// new git worktree.
 enum AgentLauncher {
     private static let worktreeKey = "AgentNewTabInWorktree"
     private static let lastFolderKey = "AgentNewTabLastFolder"
@@ -22,9 +24,9 @@ enum AgentLauncher {
         set { UserDefaults.ghostty.set(newValue, forKey: worktreeKey) }
     }
 
-    /// Open a new tab next to `controller` running Claude Code with
-    /// `account`, in `folder` (by default, see `defaultFolder`).
-    static func newClaudeTab(
+    /// Open a new tab next to `controller` running the account's agent, in
+    /// `folder` (by default, see `defaultFolder`).
+    static func newAgentTab(
         account: AgentAccount,
         from controller: BaseTerminalController,
         in folder: String? = nil,
@@ -33,33 +35,33 @@ enum AgentLauncher {
         guard let window = controller.window else { return }
         let ghostty = controller.ghostty
         let pwd = folder ?? defaultFolder(for: controller)
+        let agent = account.agent
 
         var config = Ghostty.SurfaceConfiguration()
         config.workingDirectory = pwd
         if let folder = account.folder {
-            // The whole tab uses this account, so running `claude` again
+            // The whole tab uses this account, so running the agent again
             // later in the same tab keeps it.
-            config.environmentVariables["CLAUDE_CONFIG_DIR"] = folder
+            config.environmentVariables[agent.configVariable] = folder
         }
 
         // Typed into the shell rather than run as the tab's command, so the
-        // shell stays when Claude exits, and a failing `git worktree add`
+        // shell stays when the agent exits, and a failing `git worktree add`
         // shows its error.
         if worktree, let root = gitRoot(of: pwd) {
             let stamp = Self.stamp()
             let path = "\(root).worktrees/agent-\(stamp)"
-            config.initialInput = "git worktree add -b \(quote("agent/\(stamp)")) \(quote(path)) && cd \(quote(path)) && claude\n"
+            config.initialInput = "git worktree add -b \(quote("agent/\(stamp)")) \(quote(path)) && cd \(quote(path)) && \(agent.command)\n"
         } else {
-            config.initialInput = "claude\n"
+            config.initialInput = "\(agent.command)\n"
         }
 
         _ = TerminalController.newTab(ghostty, from: window, withBaseConfig: config)
     }
 
     /// Where a new agent tab starts: the focused terminal's folder, unless
-    /// that's the home folder or `/` (Claude would ask to trust all of it).
-    /// Then the folder last chosen in the menu, or the most recent Claude
-    /// project.
+    /// that's the home folder or `/` (agents would ask to trust all of it).
+    /// Then the folder last chosen in the menu, or the most recent project.
     static func defaultFolder(for controller: BaseTerminalController) -> String {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
@@ -69,33 +71,29 @@ enum AgentLauncher {
         return recentProjects().first ?? pwd ?? home
     }
 
-    /// Folders Claude Code has worked in, most recent first, from every
-    /// account: each `.claude.json` lists them, and the matching folder in
-    /// `projects/` was touched when it was last used. Leaves out the home
-    /// folder, config folders and folders that no longer exist.
+    /// Folders the agents have worked in, most recent first, from every
+    /// account. Leaves out the home folder, config folders and folders that
+    /// no longer exist.
     static func recentProjects(limit: Int = 8) -> [String] {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
         var latest: [String: Date] = [:]
 
+        func record(_ path: String, _ used: Date) {
+            guard path != home, path != "/",
+                  !(path as NSString).lastPathComponent.hasPrefix("."),
+                  !path.contains("/.claude"), !path.contains("/.codex"),
+                  // Scratch folders of agents run by other tools.
+                  !["/tmp/", "/private/tmp/", "/private/var/folders/", "/var/folders/"].contains(where: path.hasPrefix),
+                  fm.fileExists(atPath: path) else { return }
+            latest[path] = max(latest[path] ?? .distantPast, used)
+        }
+
         for account in AgentAccountStore.shared.accounts {
             guard let folder = account.folder else { continue }
-            let config = URL(fileURLWithPath: folder).appendingPathComponent(".claude.json")
-            guard let data = try? Data(contentsOf: config),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let projects = json["projects"] as? [String: Any] else { continue }
-
-            for path in projects.keys {
-                guard path != home, path != "/",
-                      !(path as NSString).lastPathComponent.hasPrefix("."),
-                      !path.contains("/.claude"),
-                      fm.fileExists(atPath: path) else { continue }
-                // Claude names the folder by replacing everything but
-                // letters and digits with "-".
-                let name = String(path.map { $0.isLetter || $0.isNumber ? $0 : "-" })
-                let record = URL(fileURLWithPath: folder).appendingPathComponent("projects/\(name)")
-                let used = (try? fm.attributesOfItem(atPath: record.path)[.modificationDate] as? Date) ?? .distantPast
-                latest[path] = max(latest[path] ?? .distantPast, used)
+            switch account.agent {
+            case .claude: claudeProjects(in: folder, record)
+            case .codex: codexProjects(in: folder, record)
             }
         }
 
@@ -105,6 +103,60 @@ enum AgentLauncher {
             .map(\.key)
     }
 
+    /// Claude Code's: its `.claude.json` lists them, and the matching
+    /// folder in `projects/` was touched when it was last used.
+    private static func claudeProjects(in folder: String, _ record: (String, Date) -> Void) {
+        let fm = FileManager.default
+        let config = URL(fileURLWithPath: folder).appendingPathComponent(".claude.json")
+        guard let data = try? Data(contentsOf: config),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let projects = json["projects"] as? [String: Any] else { return }
+        for path in projects.keys {
+            // Claude names the folder by replacing everything but letters
+            // and digits with "-".
+            let name = String(path.map { $0.isLetter || $0.isNumber ? $0 : "-" })
+            let entry = URL(fileURLWithPath: folder).appendingPathComponent("projects/\(name)")
+            let used = (try? fm.attributesOfItem(atPath: entry.path)[.modificationDate] as? Date) ?? .distantPast
+            record(path, used)
+        }
+    }
+
+    /// Codex's: each session's file in `sessions/<year>/<month>/<day>/`
+    /// starts with the folder it ran in. Only the latest sessions are read,
+    /// and not `codex exec` runs.
+    private static func codexProjects(in folder: String, _ record: (String, Date) -> Void) {
+        let fm = FileManager.default
+        let sessions = URL(fileURLWithPath: folder).appendingPathComponent("sessions")
+        // Newest first: the folders are named by date.
+        func newest(_ url: URL) -> [URL] {
+            ((try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? [])
+                .sorted { $0.lastPathComponent > $1.lastPathComponent }
+        }
+        var files: [URL] = []
+        outer: for year in newest(sessions) {
+            for month in newest(year) {
+                for day in newest(month) {
+                    files += newest(day).filter { $0.pathExtension == "jsonl" }
+                    if files.count >= 40 { break outer }
+                }
+            }
+        }
+        for file in files.prefix(40) {
+            guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
+            let head = handle.readData(ofLength: 4096)
+            try? handle.close()
+            guard let text = String(data: head, encoding: .utf8),
+                  !text.contains("\"source\":\"exec\""),
+                  let range = text.range(of: #""cwd":"((?:[^"\\]|\\.)*)""#, options: .regularExpression)
+            else { continue }
+            let quoted = String(text[range].dropFirst(6))
+            let data = Data("[\(quoted)]".utf8)
+            guard let path = (try? JSONSerialization.jsonObject(with: data) as? [String])?.first else { continue }
+            let used = (try? fm.attributesOfItem(atPath: file.path)[.modificationDate] as? Date) ?? .distantPast
+            record(path, used)
+        }
+    }
+
     /// Ask for a folder to start in.
     static func chooseFolder(attachedTo window: NSWindow?, startingAt folder: String, done: @escaping (String) -> Void) {
         let panel = NSOpenPanel()
@@ -112,7 +164,7 @@ enum AgentLauncher {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.directoryURL = URL(fileURLWithPath: folder)
-        panel.message = "Choose the folder Claude Code starts in"
+        panel.message = "Choose the folder the agent starts in"
         panel.prompt = "Choose"
         let finish = { (response: NSApplication.ModalResponse) in
             guard response == .OK, let url = panel.url else { return }
@@ -150,20 +202,20 @@ enum AgentLauncher {
         return root.isEmpty ? nil : root
     }
 
-    /// Ask for a Claude config folder and add it as an account.
-    static func addAccount(attachedTo window: NSWindow?) {
+    /// Ask for an agent's config folder and add it as an account.
+    static func addAccount(_ agent: AgentKind, attachedTo window: NSWindow?) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.showsHiddenFiles = true
         panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-        panel.message = "Choose a Claude config folder (CLAUDE_CONFIG_DIR), e.g. ~/.claude-work"
+        panel.message = "Choose a \(agent.displayName) config folder (\(agent.configVariable)), e.g. ~/\(agent.folderPrefix)-work"
         panel.prompt = "Add Account"
 
         let add = { (response: NSApplication.ModalResponse) in
             guard response == .OK, let url = panel.url else { return }
-            AgentAccountStore.shared.add(folder: url)
+            AgentAccountStore.shared.add(folder: url, agent: agent)
         }
         if let window {
             panel.beginSheetModal(for: window, completionHandler: add)
@@ -172,13 +224,13 @@ enum AgentLauncher {
         }
     }
 
-    /// Make a new Claude account: ask for a name, create `~/.claude-<name>`
-    /// with our status hook, and open a tab running `claude` in it, where the
-    /// user logs in.
-    static func newAccount(from controller: BaseTerminalController) {
+    /// Make a new account: ask for a name, create `~/.claude-<name>` (or
+    /// `~/.codex-<name>`) with our status hook, and open a tab running the
+    /// agent in it, where the user logs in.
+    static func newAccount(_ agent: AgentKind, from controller: BaseTerminalController) {
         let alert = NSAlert()
-        alert.messageText = "New Claude Account"
-        alert.informativeText = "Creates a Claude config folder and opens a tab to log in."
+        alert.messageText = "New \(agent.displayName) Account"
+        alert.informativeText = "Creates a \(agent.displayName) config folder and opens a tab to log in."
 
         // The name shown in menus and cards, and the folder's extension:
         // "work" makes ~/.claude-work. Left empty, the extension comes from
@@ -187,7 +239,7 @@ enum AgentLauncher {
         nameField.placeholderString = "Work"
         let extField = NSTextField(string: "")
         extField.placeholderString = "work"
-        let prefix = NSTextField(labelWithString: "~/.claude-")
+        let prefix = NSTextField(labelWithString: "~/\(agent.folderPrefix)-")
         prefix.textColor = .secondaryLabelColor
         let folderRow = NSStackView(views: [prefix, extField])
         folderRow.spacing = 2
@@ -222,18 +274,18 @@ enum AgentLauncher {
             guard !ext.isEmpty else { return }
 
             let folder = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".claude-\(ext)")
+                .appendingPathComponent("\(agent.folderPrefix)-\(ext)")
             do {
-                try createClaudeConfig(at: folder)
+                try createConfig(for: agent, at: folder)
             } catch {
                 let failed = NSAlert(error: error)
                 failed.messageText = "Couldn't create \((folder.path as NSString).abbreviatingWithTildeInPath)"
                 failed.runModal()
                 return
             }
-            let account = AgentAccountStore.shared.add(folder: folder)
+            let account = AgentAccountStore.shared.add(folder: folder, agent: agent)
             if !name.isEmpty { AgentAccountStore.shared.rename(account.id, to: name) }
-            newClaudeTab(account: account, from: controller, worktree: false)
+            newAgentTab(account: account, from: controller, worktree: false)
         }
         if let window = controller.window {
             alert.beginSheetModal(for: window, completionHandler: done)
@@ -243,7 +295,7 @@ enum AgentLauncher {
     }
 
     /// A folder extension from what the user typed: lower case ASCII
-    /// letters, digits, "-" and "_", so `.claude-<ext>` is also a valid OSC 7501
+    /// letters, digits, "-" and "_", so `.claude-<ext>` (or `.codex-<ext>`) is also a valid OSC 7501
     /// account. At most 24 characters.
     static func folderExtension(_ text: String) -> String {
         let mapped = text
@@ -254,11 +306,11 @@ enum AgentLauncher {
         return String(slug.prefix(24))
     }
 
-    /// Create a Claude config folder whose settings run our status hook
+    /// Create an agent's config folder that runs our status hook
     /// (`AgentHookInstaller`). An existing folder is kept as it is.
-    private static func createClaudeConfig(at folder: URL) throws {
+    private static func createConfig(for agent: AgentKind, at folder: URL) throws {
         guard !FileManager.default.fileExists(atPath: folder.path) else { return }
-        try AgentHookInstaller.install(into: folder)
+        try AgentHookInstaller.install(into: folder, for: agent)
     }
 
     /// Ask for a new name for an account.
@@ -288,7 +340,8 @@ enum AgentLauncher {
 
     private static var shortcutMonitor: Any?
 
-    /// ⌥⌘1 … ⌥⌘9 open a Claude Code tab with the first nine accounts.
+    /// ⌥⌘1 … ⌥⌘9 open an agent tab with the first nine accounts, in the
+    /// menu's order.
     static func installShortcuts() {
         guard shortcutMonitor == nil else { return }
         shortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -296,9 +349,9 @@ enum AgentLauncher {
             guard mods == [.command, .option],
                   let digit = Self.digit(for: event.keyCode),
                   let controller = NSApp.keyWindow?.windowController as? TerminalController else { return event }
-            let accounts = AgentAccountStore.shared.accounts
+            let accounts = AgentAccountStore.shared.orderedAccounts
             guard digit <= accounts.count else { return event }
-            newClaudeTab(account: accounts[digit - 1], from: controller, worktree: startInWorktree)
+            newAgentTab(account: accounts[digit - 1], from: controller, worktree: startInWorktree)
             return nil
         }
     }
@@ -345,7 +398,7 @@ struct AgentNewTabMenu: View {
     @ObservedObject private var store = AgentAccountStore.shared
     let controller: BaseTerminalController
 
-    /// Recent Claude Code folders, read once when the menu opens.
+    /// Recent project folders (Claude Code and Codex), read once when the menu opens.
     let recents: [String]
 
     /// Reopen the menu starting in a folder, after "Choose Folder…".
@@ -387,35 +440,10 @@ struct AgentNewTabMenu: View {
 
             AgentMenuDivider()
 
-            Text("CLAUDE CODE")
-                .font(.system(size: 11.5, weight: .semibold))
-                .tracking(0.46)
-                .foregroundColor(MenuColors.muted)
-                .padding(EdgeInsets(top: 6, leading: 12, bottom: 4, trailing: 12))
-
             folderPicker
 
-            ForEach(Array(store.accounts.enumerated()), id: \.element.id) { index, account in
-                AgentAccountMenuItem(
-                    account: account,
-                    running: AgentLauncher.runningCount(for: account.id),
-                    shortcut: AgentLauncher.shortcut(forAccountAt: index),
-                    action: run {
-                        AgentLauncher.newClaudeTab(
-                            account: account, from: controller, in: folder, worktree: worktree && inGitRepo)
-                    },
-                    rename: run { AgentLauncher.rename(account, attachedTo: controller.window) })
-            }
-
-            AgentMenuItem(textColor: MenuColors.secondary, action: run {
-                AgentLauncher.newAccount(from: controller)
-            }) {
-                Text("New account…")
-            }
-            AgentMenuItem(textColor: MenuColors.secondary, action: run {
-                AgentLauncher.addAccount(attachedTo: controller.window)
-            }) {
-                Text("Add existing account…")
+            ForEach(AgentKind.allCases) { agent in
+                agentSection(agent)
             }
 
             AgentMenuDivider()
@@ -435,7 +463,6 @@ struct AgentNewTabMenu: View {
 
             AgentMenuDivider()
 
-            AgentMenuItem(shortcut: "later", enabled: false, action: {}, label: { Text("Codex") })
             AgentMenuItem(shortcut: "later", enabled: false, action: {}, label: { Text("Gemini CLI") })
         }
         .padding(6)
@@ -444,9 +471,43 @@ struct AgentNewTabMenu: View {
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(MenuColors.border, lineWidth: 1))
     }
 
+    /// An agent's accounts, and making or adding one.
+    @ViewBuilder
+    private func agentSection(_ agent: AgentKind) -> some View {
+        Text(agent.displayName.uppercased())
+            .font(.system(size: 11.5, weight: .semibold))
+            .tracking(0.46)
+            .foregroundColor(MenuColors.muted)
+            .padding(EdgeInsets(top: 6, leading: 12, bottom: 4, trailing: 12))
+
+        ForEach(store.accounts(of: agent)) { account in
+            AgentAccountMenuItem(
+                account: account,
+                running: AgentLauncher.runningCount(for: account.id),
+                shortcut: AgentLauncher.shortcut(
+                    forAccountAt: store.orderedAccounts.firstIndex(of: account) ?? Int.max),
+                action: run {
+                    AgentLauncher.newAgentTab(
+                        account: account, from: controller, in: folder, worktree: worktree && inGitRepo)
+                },
+                rename: run { AgentLauncher.rename(account, attachedTo: controller.window) })
+        }
+
+        AgentMenuItem(textColor: MenuColors.secondary, action: run {
+            AgentLauncher.newAccount(agent, from: controller)
+        }) {
+            Text("New \(agent.displayName) account…")
+        }
+        AgentMenuItem(textColor: MenuColors.secondary, action: run {
+            AgentLauncher.addAccount(agent, attachedTo: controller.window)
+        }) {
+            Text("Add existing account…")
+        }
+    }
+
     /// The folder new agent tabs start in, as a row like the others so it
     /// looks clickable: folder name, its parent below, "Change ⌄" on the
-    /// right. Clicking lists recent Claude folders and Choose Folder….
+    /// right. Clicking lists recent project folders and Choose Folder….
     private var folderPicker: some View {
         AgentMenuItem(shortcut: "Change ⌄", action: showFolderMenu) {
             Image(systemName: "folder")

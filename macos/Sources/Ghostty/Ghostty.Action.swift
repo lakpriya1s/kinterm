@@ -210,6 +210,7 @@ extension Ghostty.Action {
         var appDisplayName: String {
             switch app {
             case "claude-code": return "Claude Code"
+            case "codex": return "Codex"
             case let app?: return app
             case nil: return "Agent"
             }

@@ -383,7 +383,7 @@ private struct AgentSummaryCard: View {
     }
 
     private var account: AgentAccount? {
-        status.account.map { AgentAccountStore.shared.account(for: $0) }
+        status.account.map { AgentAccountStore.shared.account(for: $0, app: status.app) }
     }
 
     /// "2m 14s" working, "1m" otherwise, as in the Agents panel.
@@ -396,7 +396,7 @@ private struct AgentSummaryCard: View {
         let pwd = entry.controller.focusedSurface?.pwd
         let folder = pwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
         let branch = AgentGitBranch.shared.branch(at: pwd)
-        let who = account?.name ?? status.appDisplayName
+        let who = account?.label ?? status.appDisplayName
         return [who, folder, branch].compactMap { $0 }.joined(separator: " · ")
     }
 }
