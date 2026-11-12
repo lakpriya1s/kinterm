@@ -388,6 +388,11 @@ extension Ghostty {
             // Which terminal a program runs in, so KinTerm's tools (the
             // browser's CLI and MCP server) act on its own tab.
             surface_cfg.environmentVariables["KINTERM_SURFACE_ID"] = id.uuidString
+            // And how to reach this KinTerm. Set here, per terminal: the
+            // app's own environment, changed after launch, doesn't reach
+            // its terminals.
+            surface_cfg.environmentVariables["KINTERM_SOCKET"] = BrowserControlServer.socketPath
+            surface_cfg.environmentVariables["KINTERM_BROWSER_SOCKET"] = BrowserControlServer.socketPath
             let surface = surface_cfg.withCValue(view: self) { surface_cfg_c in
                 ghostty_surface_new(app, &surface_cfg_c)
             }

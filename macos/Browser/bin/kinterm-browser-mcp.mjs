@@ -16,18 +16,49 @@
 //
 // No dependencies besides Node 20+ and npx.
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import http from "node:http";
 import net from "node:net";
 import readline from "node:readline";
 
 const CHROME_DEVTOOLS_MCP = "chrome-devtools-mcp@1.13.0";
+/**
+ * KinTerm's variables from the nearest parent process that has them: the
+ * agent. Agents may not pass their environment on to MCP servers (Codex
+ * passes only what its config names, and some versions not even that), but
+ * the agent itself runs in a KinTerm terminal and has them.
+ */
+function fromAncestors() {
+  const found = {};
+  try {
+    let pid = process.ppid;
+    for (let i = 0; i < 12 && pid > 1; i++) {
+      const env = execFileSync("ps", ["-E", "-ww", "-o", "command=", "-p", String(pid)], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const surfaceMatch = / KINTERM_SURFACE_ID=([0-9A-Fa-f-]{36})(?= |$)/m.exec(env);
+      const socketMatch = / KINTERM_SOCKET=(\/.*?\.sock)(?= [A-Za-z_][A-Za-z0-9_]*=|\s*$)/m.exec(env);
+      if (surfaceMatch && !found.surface) found.surface = surfaceMatch[1];
+      if (socketMatch && !found.socket) found.socket = socketMatch[1];
+      if (found.surface && found.socket) break;
+      pid = Number(execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim());
+    }
+  } catch {
+    // ps failed or a parent went away: use what was found.
+  }
+  return found;
+}
+
+const inherited =
+  process.env.KINTERM_SOCKET && process.env.KINTERM_SURFACE_ID ? {} : fromAncestors();
+
 // The KinTerm this agent runs in (KINTERM_SOCKET, from its terminal)
 // first: KINTERM_BROWSER_SOCKET may be fixed in the agent's MCP config to
 // whichever KinTerm set it up.
-const socketPath = process.env.KINTERM_SOCKET || process.env.KINTERM_BROWSER_SOCKET;
-const surface = process.env.KINTERM_SURFACE_ID || undefined;
+const socketPath = process.env.KINTERM_SOCKET || inherited.socket || process.env.KINTERM_BROWSER_SOCKET;
+const surface = process.env.KINTERM_SURFACE_ID || inherited.surface || undefined;
 
 /** Ask KinTerm something over its socket, as this agent's terminal. */
 function ask(request) {
