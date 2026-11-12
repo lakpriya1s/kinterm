@@ -42,6 +42,9 @@ enum BrowserAgentInstaller {
         DispatchQueue.global(qos: .utility).async {
             if FileManager.default.fileExists(atPath: cliURL.path) { try? installCLI() }
             for folder in folders where isSkillInstalled(in: folder) { try? installSkill(into: folder) }
+            // Added by an older KinTerm: Codex doesn't yet pass on which
+            // terminal it runs in.
+            if codexNeedsSurfaceForwarding { _ = forwardSurfaceToCodex() }
         }
     }
 
@@ -183,11 +186,76 @@ enum BrowserAgentInstaller {
         if shell("command -v codex").status == 0 {
             _ = shell("codex mcp remove \(serverName)")
             let result = shell("codex mcp add \(serverName) --env \(socket) -- \(cli) mcp")
-            outcomes.append(Outcome(name: "Codex", ok: result.status == 0, detail: result.status == 0 ? "added" : result.output))
+            var detail = result.status == 0 ? "added" : result.output
+            if result.status == 0, !forwardSurfaceToCodex() {
+                detail = "added; update Codex so each agent gets its own tab's browser"
+            }
+            outcomes.append(Outcome(name: "Codex", ok: result.status == 0, detail: detail))
         } else {
             outcomes.append(Outcome(name: "Codex", ok: true, detail: "not installed, skipped"))
         }
         return outcomes
+    }
+
+    // MARK: Codex
+
+    /// Codex gives MCP servers only the environment it's told to, unlike
+    /// Claude Code, which passes its own on. Without KINTERM_SURFACE_ID the
+    /// browser can't tell which tab a Codex agent is in, so it would get
+    /// the tab in front, and every tab's page.
+    private static let codexForwardedVariables = ["KINTERM_SURFACE_ID"]
+
+    private static var codexConfigURL: URL {
+        let home = ProcessInfo.processInfo.environment["CODEX_HOME"].flatMap { $0.isEmpty ? nil : $0 }
+            .map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
+        return home.appendingPathComponent("config.toml")
+    }
+
+    /// Where the server's table is in Codex's config, and whether it
+    /// already forwards the variables.
+    private static func codexServerTable(in lines: [String]) -> (header: Int, forwards: Bool)? {
+        let headers = ["[mcp_servers.\(serverName)]", "[mcp_servers.\"\(serverName)\"]"]
+        guard let header = lines.firstIndex(where: { headers.contains($0.trimmingCharacters(in: .whitespaces)) })
+        else { return nil }
+        var forwards = false
+        for line in lines[(header + 1)...] {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") { break }
+            if trimmed.hasPrefix("env_vars") { forwards = true }
+        }
+        return (header, forwards)
+    }
+
+    /// Whether Codex has the browser's MCP server but doesn't forward the
+    /// terminal to it.
+    static var codexNeedsSurfaceForwarding: Bool {
+        guard let text = try? String(contentsOf: codexConfigURL, encoding: .utf8),
+              let table = codexServerTable(in: text.components(separatedBy: "\n")) else { return false }
+        return !table.forwards
+    }
+
+    /// Have Codex pass KINTERM_SURFACE_ID on to the browser's MCP server
+    /// (its `env_vars`). If this Codex doesn't understand that, its config
+    /// is put back as it was. Returns whether Codex now forwards it.
+    @discardableResult
+    static func forwardSurfaceToCodex() -> Bool {
+        let url = codexConfigURL
+        guard let original = try? String(contentsOf: url, encoding: .utf8) else { return false }
+        var lines = original.components(separatedBy: "\n")
+        guard let table = codexServerTable(in: lines) else { return false }
+        if table.forwards { return true }
+        let names = codexForwardedVariables.map { "\"\($0)\"" }.joined(separator: ", ")
+        lines.insert("env_vars = [\(names)]", at: table.header + 1)
+        do {
+            try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            return false
+        }
+        // An older Codex rejects keys it doesn't know; it must still start.
+        if shell("codex mcp get \(serverName)").status == 0 { return true }
+        try? original.write(to: url, atomically: true, encoding: .utf8)
+        return false
     }
 
     /// Run a command in your login shell, so `claude` and `codex` are on
