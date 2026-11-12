@@ -156,7 +156,7 @@ extension TerminalView {
     private var terminals: some View {
         switch layout {
         case .normal:
-            ReviewPanelHost(controller: delegate as? BaseTerminalController) {
+            TerminalSidePanels(controller: delegate as? BaseTerminalController) {
                 TerminalSplitTreeView(
                     tree: viewModel.surfaceTree,
                     action: { delegate?.performSplitAction($0) })

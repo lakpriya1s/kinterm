@@ -873,7 +873,10 @@ extension Ghostty {
             let target = UntrustedURL(value)
             switch target.decision {
             case .allow(let url):
-                _ = NSWorkspace.shared.open(url)
+                // Local dev servers open in KinTerm's browser, if it has one.
+                if !BrowserCenter.shared.openLink(url) {
+                    _ = NSWorkspace.shared.open(url)
+                }
 
             case .confirm(let url):
                 UntrustedURLAlert.presentConfirmation(

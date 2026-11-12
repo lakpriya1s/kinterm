@@ -1,0 +1,99 @@
+#!/bin/sh
+# kinterm-browser: KinTerm's browser, from a terminal or an agent.
+#
+#   kinterm-browser open [url]   open the browser (and a page): 3000, localhost:5173, example.com
+#   kinterm-browser reload|back|forward|devtools|close
+#   kinterm-browser window       move the browser into its own window, or back
+#   kinterm-browser status       what's open, as JSON
+#   kinterm-browser port         the Chrome DevTools Protocol port (127.0.0.1)
+#   kinterm-browser mcp          MCP server for agents (Chrome DevTools MCP on this browser)
+#
+# KinTerm's terminals have this on their PATH. It talks to KinTerm over a
+# socket only you can use (KINTERM_BROWSER_SOCKET).
+
+set -eu
+
+here=$(cd "$(dirname "$0")" && pwd)
+
+if [ -z "${KINTERM_BROWSER_SOCKET:-}" ]; then
+  id=com.kinterm.app
+  # Run from inside an app bundle: that KinTerm's socket.
+  if [ -f "$here/../Info.plist" ]; then
+    id=$(plutil -extract CFBundleIdentifier raw "$here/../Info.plist" 2>/dev/null || echo com.kinterm.app)
+  fi
+  KINTERM_BROWSER_SOCKET="$HOME/Library/Application Support/$id/browser.sock"
+fi
+export KINTERM_BROWSER_SOCKET
+
+usage() {
+  sed -n '3,10p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+request() {
+  if [ ! -S "$KINTERM_BROWSER_SOCKET" ]; then
+    echo "kinterm-browser: KinTerm isn't running (no socket at $KINTERM_BROWSER_SOCKET)." >&2
+    exit 1
+  fi
+  printf '%s\n' "$1" | nc -U "$KINTERM_BROWSER_SOCKET"
+}
+
+json_string() {
+  printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+}
+
+field() {
+  printf '%s' "$1" | sed -n "s/.*\"$2\":\"\\([^\"]*\\)\".*/\\1/p" | sed 's/\\\//\//g'
+}
+
+run() {
+  reply=$(request "$1")
+  case "$reply" in
+    *'"ok":true'*)
+      url=$(field "$reply" url)
+      [ -n "$url" ] && echo "$url"
+      return 0
+      ;;
+    *)
+      error=$(field "$reply" error)
+      echo "kinterm-browser: ${error:-no reply from KinTerm}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+command=${1:-help}
+[ "$#" -gt 0 ] && shift
+
+case "$command" in
+  open)
+    if [ "$#" -gt 0 ]; then
+      run "{\"cmd\":\"open\",\"url\":$(json_string "$*")}"
+    else
+      run '{"cmd":"open"}'
+    fi
+    ;;
+  reload | back | forward | devtools | close | window)
+    run "{\"cmd\":\"$command\"}"
+    ;;
+  status)
+    request '{"cmd":"status"}'
+    ;;
+  port)
+    request '{"cmd":"status"}' | sed -n 's/.*"port":\([0-9]*\).*/\1/p'
+    ;;
+  mcp)
+    for mcp in "$here/kinterm-browser-mcp.mjs" "$here/../Resources/browser/kinterm-browser-mcp.mjs"; do
+      [ -f "$mcp" ] && exec node "$mcp" "$@"
+    done
+    echo "kinterm-browser: the MCP server script is missing next to $0" >&2
+    exit 1
+    ;;
+  help | -h | --help)
+    usage
+    ;;
+  *)
+    echo "kinterm-browser: unknown command '$command'" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

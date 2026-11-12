@@ -196,6 +196,10 @@ class AppDelegate: NSObject,
         #endif
 
         UserDefaults.migrateAgentSettingsFromGhostty()
+
+        // Before any terminal starts, so they all get KINTERM_BROWSER_SOCKET.
+        // Loads nothing of the browser itself.
+        BrowserCenter.shared.start()
         UserDefaults.ghostty.register(defaults: [
             // Disable the automatic full screen menu item because we handle
             // it manually.

@@ -9,6 +9,11 @@ the update there through Sparkle.
 Dev builds have no feed or update key, so they never update. Only builds
 from this workflow do (`UpdateController.isEnabled`).
 
+Both release paths include the browser: they run `macos/Browser/build.sh`
+(Chromium, cached in CI by its version) and sign it with
+`macos/Browser/sign.sh` before the app. It adds about 330 MB to the app and
+runs on Apple silicon only; on Intel Macs the browser says so.
+
 ## A DMG from this Mac (no CI)
 
 ```sh
