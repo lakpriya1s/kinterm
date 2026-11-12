@@ -16,11 +16,17 @@ enum AgentKind: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// The command that starts it.
+    /// The command that starts it in a KinTerm tab.
+    ///
+    /// Codex (0.16x) normally runs its sessions in a shared background
+    /// app-server, which starts MCP servers and hooks with its own
+    /// environment and no terminal: the browser's MCP server and the status
+    /// hook then can't tell which tab (or which KinTerm) the session is in.
+    /// Tabs KinTerm opens run the session in Codex's own process instead.
     var command: String {
         switch self {
         case .claude: return "claude"
-        case .codex: return "codex"
+        case .codex: return "codex -c features.daemon_auto_start=false"
         }
     }
 
