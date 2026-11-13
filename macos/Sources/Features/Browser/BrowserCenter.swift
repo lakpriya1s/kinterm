@@ -2,8 +2,8 @@ import AppKit
 import Combine
 import SwiftUI
 
-// Where browsers are shown: beside a tab's terminal, one per tab, or as one
-// more tile in Grid View, one per grid. ⌘⇧B (View › Browser) toggles it.
+// Where browsers are shown: beside a tab's terminal, one per tab, or as more
+// tiles in Grid View, one per tab, opened for the tile you're in. ⌘⇧B (View › Browser) toggles it.
 // Agents drive the same browsers through `kinterm-browser` and its MCP
 // server (BrowserControlServer). See scope/designs/09-browser.md.
 
@@ -15,8 +15,11 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
     /// Browsers beside a tab's terminal, by tab.
     @Published private(set) var panels: [ObjectIdentifier: BrowserPage] = [:]
 
-    /// Browser tiles, by grid (tab group).
-    @Published private(set) var gridPages: [ObjectIdentifier: BrowserPage] = [:]
+    /// Browser tiles, by grid (tab group), in the order they were opened.
+    @Published private(set) var gridPages: [ObjectIdentifier: [BrowserPage]] = [:]
+
+    /// The tab each browser tile was opened for, by page.
+    private var gridOwners: [ObjectIdentifier: Weak<BaseTerminalController>] = [:]
 
     /// Browsers popped out into windows of their own, with the tab they
     /// came from (where they go back to).
@@ -145,7 +148,7 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
     // MARK: Agents
 
     /// The tab a page belongs to: the one it's beside, the one it popped
-    /// out of, or for a grid's tile, the grid's focused tab.
+    /// out of, or the one a grid tile was opened for.
     @MainActor
     func owner(of page: BrowserPage) -> BaseTerminalController? {
         let controllers = NSApp.windows.compactMap { $0.windowController as? BaseTerminalController }
@@ -153,7 +156,8 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
             return controllers.first { ObjectIdentifier($0) == key }
         }
         if let entry = windows[ObjectIdentifier(page)] { return entry.from.value }
-        if let key = gridPages.first(where: { $0.value === page })?.key {
+        if let owner = gridOwners[ObjectIdentifier(page)]?.value { return owner }
+        if let key = gridKey(of: page) {
             for window in NSApp.windows where Self.gridKey(window) == key && TerminalGridModel.shared.isActive(for: window) {
                 if let focused = TerminalGridModel.shared.focusedController(in: window) { return focused }
             }
@@ -172,12 +176,12 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
         return nil
     }
 
-    /// The browser a tab's agents use: the grid's tile in Grid View, the
-    /// panel beside it, or the one that popped out of it. Never another
-    /// tab's.
+    /// The browser a tab's agents use: its tile in Grid View, the panel
+    /// beside it, or the one that popped out of it. Never another tab's.
     @MainActor
     func page(for controller: BaseTerminalController) -> BrowserPage? {
-        if let window = controller.gridWindow ?? controller.window, let page = gridPage(for: window) { return page }
+        if let window = controller.gridWindow ?? controller.window,
+           let page = gridPage(of: controller, in: window) { return page }
         if let page = panelPage(for: controller) { return page }
         return windows.values.first { $0.from.value === controller }?.page
     }
@@ -234,23 +238,53 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
         ObjectIdentifier(TerminalGridModel.groupObject(for: window))
     }
 
-    /// The window's grid browser tile, if its grid has one.
-    func gridPage(for window: NSWindow?) -> BrowserPage? {
-        guard let window, TerminalGridModel.shared.isActive(for: window) else { return nil }
-        return gridPages[Self.gridKey(window)]
+    /// The grid a tile is in.
+    private func gridKey(of page: BrowserPage) -> ObjectIdentifier? {
+        gridPages.first { $0.value.contains { $0 === page } }?.key
     }
 
+    /// The window's grid browser tiles, in tile order.
+    func gridPages(for window: NSWindow?) -> [BrowserPage] {
+        guard let window, TerminalGridModel.shared.isActive(for: window) else { return [] }
+        return gridPages[Self.gridKey(window)] ?? []
+    }
+
+    /// The tab's browser tile in the window's grid, if it has one.
+    func gridPage(of controller: BaseTerminalController, in window: NSWindow?) -> BrowserPage? {
+        gridPages(for: window).first { gridOwners[ObjectIdentifier($0)]?.value === controller }
+    }
+
+    private func gridChanged() {
+        TerminalGridModel.shared.changed()
+        // Tiles move when one comes or goes; the grid re-syncs its
+        // terminals on tab bar changes.
+        AgentTabBarModel.setNeedsRefresh()
+    }
+
+    private func addGridTile(_ page: BrowserPage, for controller: BaseTerminalController, in window: NSWindow) {
+        gridPages[Self.gridKey(window), default: []].append(page)
+        gridOwners[ObjectIdentifier(page)] = Weak(controller)
+        gridChanged()
+    }
+
+    /// Take a tile out of its grid, without closing its page.
+    private func removeGridTile(_ page: BrowserPage) {
+        guard let key = gridKey(of: page) else { return }
+        let rest = gridPages[key]?.filter { $0 !== page } ?? []
+        gridPages[key] = rest.isEmpty ? nil : rest
+        gridOwners[ObjectIdentifier(page)] = nil
+        gridChanged()
+    }
+
+    /// The tab's browser tile, opening one beside the grid's others if it
+    /// has none.
     @MainActor
     @discardableResult
-    func openGridTile(in window: NSWindow, url: String? = nil, focus: Bool = true) -> BrowserPage {
-        let key = Self.gridKey(window)
-        let page = gridPages[key] ?? {
+    func openGridTile(for controller: BaseTerminalController, in window: NSWindow,
+                      url: String? = nil, focus: Bool = true) -> BrowserPage {
+        let page = gridPage(of: controller, in: window) ?? {
             let page = BrowserPage(url: url ?? lastURL)
-            gridPages[key] = page
-            TerminalGridModel.shared.changed()
-            // Tiles move when one comes or goes; the grid re-syncs its
-            // terminals on tab bar changes.
-            AgentTabBarModel.setNeedsRefresh()
+            addGridTile(page, for: controller, in: window)
             return page
         }()
         if let url, url != page.url { page.load(url) }
@@ -258,15 +292,13 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
         return page
     }
 
+    /// Close a grid tile and give the keyboard back to the tab it was for.
     @MainActor
-    func closeGridTile(in window: NSWindow) {
-        guard let page = gridPages.removeValue(forKey: Self.gridKey(window)) else { return }
+    func closeGridTile(_ page: BrowserPage) {
+        let owner = gridOwners[ObjectIdentifier(page)]?.value
+        removeGridTile(page)
         page.close()
-        TerminalGridModel.shared.changed()
-        AgentTabBarModel.setNeedsRefresh()
-        if let controller = TerminalGridModel.shared.focusedController(in: window) {
-            TerminalGridModel.shared.focus(controller)
-        }
+        if let owner { TerminalGridModel.shared.focus(owner) }
     }
 
     /// The grid's tile left the screen: if that's because the grid closed,
@@ -274,12 +306,12 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
     @MainActor
     func gridTileDisappeared(_ page: BrowserPage) {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let key = self.gridPages.first(where: { $0.value === page })?.key else { return }
+            guard let self, let key = self.gridKey(of: page) else { return }
             let stillShown = NSApp.windows.contains {
                 Self.gridKey($0) == key && TerminalGridModel.shared.isActive(for: $0)
             }
             if !stillShown {
-                self.gridPages[key] = nil
+                self.removeGridTile(page)
                 page.close()
             }
         }
@@ -289,10 +321,9 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
     /// of their own, so the grid lays out again.
     @MainActor
     func devToolsChanged(_ page: BrowserPage) {
-        guard gridPages.values.contains(where: { $0 === page }) else { return }
+        guard gridKey(of: page) != nil else { return }
         objectWillChange.send()
-        TerminalGridModel.shared.changed()
-        AgentTabBarModel.setNeedsRefresh()
+        gridChanged()
     }
 
     // MARK: Opening
@@ -301,13 +332,13 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
         TerminalGridModel.shared.isActive(for: controller.gridWindow ?? controller.window)
     }
 
-    /// The browser for a tab: its grid's tile in Grid View, else its panel.
-    /// Opens one if it isn't there.
+    /// The browser for a tab: its tile in Grid View, else its panel. Opens
+    /// one if it isn't there.
     @MainActor
     @discardableResult
     func show(for controller: BaseTerminalController, url: String? = nil, focus: Bool = true) -> BrowserPage {
         if inGrid(controller), let window = controller.gridWindow ?? controller.window {
-            return openGridTile(in: window, url: url, focus: focus)
+            return openGridTile(for: controller, in: window, url: url, focus: focus)
         }
         return showPanel(for: controller, url: url, focus: focus)
     }
@@ -315,7 +346,11 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
     @MainActor
     func toggle(for controller: BaseTerminalController) {
         if inGrid(controller), let window = controller.gridWindow ?? controller.window {
-            if gridPage(for: window) != nil { closeGridTile(in: window) } else { openGridTile(in: window) }
+            if let page = gridPage(of: controller, in: window) {
+                closeGridTile(page)
+            } else {
+                openGridTile(for: controller, in: window)
+            }
         } else if panelPage(for: controller) != nil {
             hidePanel(for: controller)
         } else {
@@ -358,7 +393,7 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
 
     /// Every open browser, panels and tiles.
     var allPages: [BrowserPage] {
-        Array(panels.values) + Array(gridPages.values) + windows.values.map(\.page)
+        Array(panels.values) + gridPages.values.flatMap { $0 } + windows.values.map(\.page)
     }
 
     /// A browser in a window of its own, if there is one: agents use it
@@ -384,11 +419,9 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
             from = NSApp.windows.compactMap { $0.windowController as? BaseTerminalController }
                 .first { ObjectIdentifier($0) == entry.key }
         }
-        if let key = gridPages.first(where: { $0.value === page })?.key {
-            gridPages[key] = nil
-            from = frontController
-            TerminalGridModel.shared.changed()
-            AgentTabBarModel.setNeedsRefresh()
+        if gridKey(of: page) != nil {
+            from = gridOwners[ObjectIdentifier(page)]?.value ?? frontController
+            removeGridTile(page)
         }
 
         let window = NSWindow(
@@ -445,10 +478,11 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
         entry.window.contentView = nil
         entry.window.close()
         if inGrid(controller), let window = controller.gridWindow ?? controller.window {
-            gridPages[Self.gridKey(window)]?.close()
-            gridPages[Self.gridKey(window)] = page
-            TerminalGridModel.shared.changed()
-            AgentTabBarModel.setNeedsRefresh()
+            if let old = gridPage(of: controller, in: window) {
+                removeGridTile(old)
+                old.close()
+            }
+            addGridTile(page, for: controller, in: window)
         } else {
             panels[ObjectIdentifier(controller)]?.close()
             panels[ObjectIdentifier(controller)] = page
@@ -478,15 +512,22 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
             entry.page.close()
             return
         }
-        if let controller = window.windowController as? BaseTerminalController,
-           let page = panels.removeValue(forKey: ObjectIdentifier(controller)) {
-            page.close()
+        if let controller = window.windowController as? BaseTerminalController {
+            if let page = panels.removeValue(forKey: ObjectIdentifier(controller)) { page.close() }
+            // A tab's grid tile goes with the tab.
+            for page in gridPages.values.flatMap({ $0 }) where gridOwners[ObjectIdentifier(page)]?.value === controller {
+                removeGridTile(page)
+                page.close()
+            }
         }
-        // The grid's tile goes with the last window of the grid.
+        // The grid's tiles go with the last window of the grid.
         let key = Self.gridKey(window)
         let others = NSApp.windows.filter { $0 !== window && $0.isVisible && Self.gridKey($0) == key }
-        if others.isEmpty, let page = gridPages.removeValue(forKey: key) {
-            page.close()
+        if others.isEmpty, let pages = gridPages.removeValue(forKey: key) {
+            for page in pages {
+                gridOwners[ObjectIdentifier(page)] = nil
+                page.close()
+            }
         }
     }
 
@@ -543,7 +584,8 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
             return entry.page
         }
         guard let controller = menuController else { return nil }
-        if let window = controller.gridWindow ?? controller.window, let page = gridPage(for: window) { return page }
+        if let window = controller.gridWindow ?? controller.window,
+           let page = gridPage(of: controller, in: window) { return page }
         return panelPage(for: controller)
     }
 
@@ -615,22 +657,27 @@ struct TerminalSidePanels<Content: View>: View {
         // terminals.
         HStack(spacing: 0) {
             ReviewPanelHost(controller: controller) {
-                HStack(spacing: 0) {
-                    content()
-                    if let controller, let page = browsers.panelPage(for: controller) {
-                        PanelResizeHandle(width: $browsers.panelWidth)
-                        BrowserView(
-                            page: page,
-                            close: { [weak controller] in
-                                guard let controller else { return }
-                                Task { @MainActor in BrowserCenter.shared.hidePanel(for: controller) }
-                            },
-                            popOut: { [weak page] in
-                                guard let page else { return }
-                                Task { @MainActor in BrowserCenter.shared.popOut(page) }
-                            })
-                        .frame(width: browsers.panelWidth)
-                        .id(ObjectIdentifier(page))
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        content()
+                            .frame(minWidth: 0, maxWidth: .infinity)
+                        if let controller, let page = browsers.panelPage(for: controller) {
+                            PanelResizeHandle(width: $browsers.panelWidth, defaultWidth: 560)
+                                .zIndex(1)
+                            BrowserView(
+                                page: page,
+                                close: { [weak controller] in
+                                    guard let controller else { return }
+                                    Task { @MainActor in BrowserCenter.shared.hidePanel(for: controller) }
+                                },
+                                popOut: { [weak page] in
+                                    guard let page else { return }
+                                    Task { @MainActor in BrowserCenter.shared.popOut(page) }
+                                })
+                            .frame(width: PanelResizeHandle.fit(browsers.panelWidth, in: geometry.size.width))
+                            .clipped()
+                            .id(ObjectIdentifier(page))
+                        }
                     }
                 }
             }

@@ -169,8 +169,9 @@ final class BrowserControlServer {
 
         case "close":
             guard let controller = tab else { return fail("No KinTerm window is open.") }
-            if let window = controller.gridWindow ?? controller.window, center.gridPage(for: window) != nil {
-                center.closeGridTile(in: window)
+            if let window = controller.gridWindow ?? controller.window,
+               let page = center.gridPage(of: controller, in: window) {
+                center.closeGridTile(page)
             } else {
                 center.hidePanel(for: controller)
             }
