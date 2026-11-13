@@ -51,10 +51,13 @@ struct ReviewFileDiff: Hashable, Identifiable {
 
     var id: String { path }
 
-    /// Path in the new tree, or the old one for a deleted file.
-    let path: String
+    /// Path in the new tree, or the old one for a deleted file. Starts with
+    /// its repository's prefix once the review has placed it in a workspace.
+    private(set) var path: String
     /// Where a renamed file came from.
-    let oldPath: String?
+    private(set) var oldPath: String?
+    /// The prefix of the repository the file is in; see `ReviewRepo`.
+    private(set) var repo = ""
     let status: Status
     let binary: Bool
     let hunks: [ReviewHunk]
@@ -73,6 +76,19 @@ struct ReviewFileDiff: Hashable, Identifiable {
         hasher.combine(binary)
         for hunk in hunks { hasher.combine(hunk.patchText) }
         return hasher.finalize()
+    }
+
+    /// The path as git knows it, inside its own repository.
+    var gitPath: String { String(path.dropFirst(repo.count)) }
+    var gitOldPath: String? { oldPath.map { String($0.dropFirst(repo.count)) } }
+
+    /// The same file, with paths relative to the workspace.
+    func inRepo(_ prefix: String) -> ReviewFileDiff {
+        var file = self
+        file.repo = prefix
+        file.path = prefix + path
+        file.oldPath = oldPath.map { prefix + $0 }
+        return file
     }
 
     var fileName: String { (path as NSString).lastPathComponent }
@@ -220,7 +236,9 @@ enum ReviewGit {
     /// Files git doesn't track and doesn't ignore.
     static func untracked(in root: String) async throws -> [String] {
         let output = try await check(["ls-files", "-z", "--others", "--exclude-standard"], in: root)
-        return split0(output.stdout)
+        // A repository inside this one is listed as its folder, ending in
+        // "/". The review shows it as a repository of its own.
+        return split0(output.stdout).filter { !$0.hasSuffix("/") }
     }
 
     /// Every file in the repository that isn't ignored, tracked or not.
@@ -228,7 +246,7 @@ enum ReviewGit {
         let output = try await check(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], in: root)
         var seen = Set<String>()
         // Unmerged files are listed once per stage.
-        return split0(output.stdout).filter { seen.insert($0).inserted }
+        return split0(output.stdout).filter { !$0.hasSuffix("/") && seen.insert($0).inserted }
     }
 
     /// Record the working tree as it is now, without touching it.
@@ -278,11 +296,27 @@ enum ReviewGit {
         if size > 2 << 20 {
             return ReviewFileDiff(path: path, oldPath: nil, status: .added, binary: true, hunks: [])
         }
-        // Exits 1 when the files differ, which they always do here.
-        guard let output = try? await run(["diff", "--no-index", "--no-ext-diff", "--", "/dev/null", path], in: root),
-              output.status <= 1 else { return nil }
-        return parse(output.stdout).first
-            ?? ReviewFileDiff(path: path, oldPath: nil, status: .added, binary: false, hunks: [])
+        // Built here rather than with `git diff --no-index`: a workspace can
+        // have hundreds of new files, and a process each adds up.
+        guard let data = FileManager.default.contents(atPath: url.path) else { return nil }
+        if data.prefix(8000).contains(0) {
+            return ReviewFileDiff(path: path, oldPath: nil, status: .added, binary: true, hunks: [])
+        }
+        guard !data.isEmpty else {
+            return ReviewFileDiff(path: path, oldPath: nil, status: .added, binary: false, hunks: [])
+        }
+        var texts = String(decoding: data, as: UTF8.self).components(separatedBy: "\n")
+        let endsWithNewline = texts.last == ""
+        if endsWithNewline { texts.removeLast() }
+        var lines = texts.enumerated().map { i, text in
+            ReviewDiffLine(kind: .added, text: text, old: nil, new: i + 1)
+        }
+        if !endsWithNewline {
+            lines.append(ReviewDiffLine(kind: .noNewline, text: "No newline at end of file", old: nil, new: nil))
+        }
+        let header = "@@ -0,0 +1\(texts.count == 1 ? "" : ",\(texts.count)") @@"
+        return ReviewFileDiff(path: path, oldPath: nil, status: .added, binary: false,
+                              hunks: [ReviewHunk(id: 0, header: header, lines: lines)])
     }
 
     /// The file's text at `rev`, or in the working tree when nil.
@@ -297,6 +331,20 @@ enum ReviewGit {
         return .text(String(decoding: data, as: UTF8.self))
     }
 
+    /// The file as it was at `rev`, written to a temporary file named like
+    /// the original so Quick Look knows what it is. Nil if it wasn't there.
+    static func export(_ path: String, at rev: String, in root: String, to dir: URL) async -> URL? {
+        guard let output = try? await run(["show", "\(rev):\(path)"], in: root), output.status == 0 else { return nil }
+        let url = dir.appendingPathComponent((path as NSString).lastPathComponent)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try output.stdout.write(to: url)
+        } catch {
+            return nil
+        }
+        return url
+    }
+
     enum FileContents {
         case text(String)
         case binary
@@ -308,8 +356,9 @@ enum ReviewGit {
 
     /// Put one hunk back the way it was in the working tree.
     static func revert(_ hunk: ReviewHunk, of file: ReviewFileDiff, in root: String) async throws {
-        let old = file.oldPath ?? file.path
-        let patch = "diff --git a/\(old) b/\(file.path)\n--- a/\(old)\n+++ b/\(file.path)\n" + hunk.patchText
+        let path = file.gitPath
+        let old = file.gitOldPath ?? path
+        let patch = "diff --git a/\(old) b/\(path)\n--- a/\(old)\n+++ b/\(path)\n" + hunk.patchText
         try await check(["apply", "-R", "--whitespace=nowarn", "--recount", "-"], in: root, input: patch)
     }
 
@@ -317,15 +366,15 @@ enum ReviewGit {
     static func revert(_ file: ReviewFileDiff, to base: String, in root: String) async throws {
         let rootURL = URL(fileURLWithPath: root)
         if file.status == .added || file.untracked {
-            try FileManager.default.trashItem(at: rootURL.appendingPathComponent(file.path), resultingItemURL: nil)
+            try FileManager.default.trashItem(at: rootURL.appendingPathComponent(file.gitPath), resultingItemURL: nil)
             return
         }
-        if file.status == .renamed, let oldPath = file.oldPath {
+        if file.status == .renamed, let oldPath = file.gitOldPath {
             try await check(["restore", "--source=\(base)", "--worktree", "--", oldPath], in: root)
-            try FileManager.default.trashItem(at: rootURL.appendingPathComponent(file.path), resultingItemURL: nil)
+            try FileManager.default.trashItem(at: rootURL.appendingPathComponent(file.gitPath), resultingItemURL: nil)
             return
         }
-        try await check(["restore", "--source=\(base)", "--worktree", "--", file.path], in: root)
+        try await check(["restore", "--source=\(base)", "--worktree", "--", file.gitPath], in: root)
     }
 
     // MARK: Parsing

@@ -1,3 +1,4 @@
+import Quartz
 import SwiftUI
 
 // The review view, shown beside a terminal or in its own window: what the
@@ -26,6 +27,13 @@ struct ReviewView: View {
             ReviewHeader(model: model, presentation: presentation,
                          switchPresentation: switchPresentation, close: close)
             Divider().overlay(ReviewColors.border)
+                .overlay(alignment: .top) {
+                    // Something's being looked up: a thin moving bar, so a
+                    // big workspace doesn't look stuck.
+                    if model.loading || (model.tab == .files && model.treeLoading) {
+                        ReviewLoadingBar()
+                    }
+                }
             content
             Divider().overlay(ReviewColors.border)
             ReviewFooter(model: model)
@@ -96,10 +104,19 @@ private struct ReviewHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: "arrow.triangle.branch")
+                Image(systemName: model.headerRepo == nil ? "square.stack.3d.up" : "arrow.triangle.branch")
                     .foregroundColor(ReviewColors.secondary)
-                Text(model.repoName).font(.system(size: 12, weight: .semibold))
-                if let branch = model.branch {
+                if model.isMultiRepo {
+                    ReviewRepoPicker(model: model)
+                } else {
+                    Text(model.repoName).font(.system(size: 12, weight: .semibold))
+                }
+                if model.headerRepo == nil, model.isMultiRepo {
+                    Text("\(model.repos.count) repositories")
+                        .font(.system(size: 11))
+                        .foregroundColor(ReviewColors.secondary)
+                        .lineLimit(1)
+                } else if let branch = model.branch {
                     Text(branch)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(ReviewColors.secondary)
@@ -107,8 +124,9 @@ private struct ReviewHeader: View {
                         .truncationMode(.middle)
                 }
                 Spacer(minLength: 4)
-                if model.loading {
+                if model.loading || model.treeLoading {
                     ProgressView().controlSize(.small).scaleEffect(0.7)
+                        .help(model.loading ? "Looking for changes…" : "Listing files…")
                 }
                 ReviewIconButton(symbol: "arrow.clockwise", help: "Refresh") { model.refresh() }
                 if let switchPresentation {
@@ -151,6 +169,52 @@ private struct ReviewHeader: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(ReviewColors.surface)
+    }
+}
+
+/// Shows every repository in a workspace, or just one.
+private struct ReviewRepoPicker: View {
+    @ObservedObject var model: ReviewModel
+
+    var body: some View {
+        Menu {
+            Picker("Repository", selection: $model.focusedRepo) {
+                Text("All Repositories").tag(String?.none)
+                Divider()
+                ForEach(model.repos) { repo in
+                    let count = model.changeCount(repo)
+                    Text(count > 0 ? "\(repo.name)  ·  \(count)" : repo.name).tag(Optional(repo.prefix))
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Text(model.repoName).font(.system(size: 12, weight: .semibold))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(model.workspace?.file.map { "Repositories from \(($0 as NSString).lastPathComponent)" }
+              ?? "Repositories in this folder")
+    }
+}
+
+/// An indeterminate bar along the header's bottom edge.
+private struct ReviewLoadingBar: View {
+    @State private var phase: CGFloat = -0.3
+
+    var body: some View {
+        GeometryReader { geometry in
+            Capsule()
+                .fill(ReviewColors.accent)
+                .frame(width: geometry.size.width * 0.3, height: 2)
+                .offset(x: geometry.size.width * phase)
+        }
+        .frame(height: 2)
+        .clipped()
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: false)) { phase = 1 }
+        }
+        .allowsHitTesting(false)
     }
 }
 
@@ -216,7 +280,16 @@ private struct ReviewChangesList: View {
                     .background(ReviewColors.card)
             }
 
-            if model.files.isEmpty {
+            if model.files.isEmpty, model.excludedCount > 0 {
+                VStack(spacing: 10) {
+                    ReviewEmpty(
+                        symbol: "eye.slash",
+                        title: "Only excluded changes",
+                        detail: "\(model.excludedCount) changed file\(model.excludedCount == 1 ? " is" : "s are") hidden by files.exclude.")
+                    Button("Show Them") { model.showExcluded = true }
+                    Spacer()
+                }
+            } else if model.files.isEmpty {
                 ReviewEmpty(
                     symbol: "checkmark.circle",
                     title: model.loading ? "Looking for changes…" : "No changes",
@@ -226,8 +299,19 @@ private struct ReviewChangesList: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(model.files) { file in
-                                ReviewFileRow(model: model, file: file).id(file.path)
+                            switch model.changesLayout {
+                            case .list:
+                                ForEach(model.files) { file in
+                                    ReviewFileRow(model: model, file: file).id(file.path)
+                                }
+                            case .tree:
+                                ForEach(model.visibleChangeRows) { row in
+                                    if let file = row.node.file {
+                                        ReviewFileRow(model: model, file: file, depth: row.depth).id(file.path)
+                                    } else {
+                                        ReviewFolderRow(model: model, node: row.node, depth: row.depth).id(row.id)
+                                    }
+                                }
                             }
                         }
                         .padding(.vertical, 4)
@@ -246,23 +330,147 @@ private struct ReviewChangesList: View {
             Text("\(model.files.count) file\(model.files.count == 1 ? "" : "s")")
             Text("+\(totals.added)").foregroundColor(ReviewColors.addedText)
             Text("−\(totals.removed)").foregroundColor(ReviewColors.removedText)
+            if model.excludedCount > 0 || model.showExcluded {
+                Button(model.showExcluded ? "hide excluded" : "\(model.excludedCount) excluded") {
+                    model.showExcluded.toggle()
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(ReviewColors.accent)
+                .help(model.showExcluded
+                      ? "Hide files that files.exclude hides"
+                      : "Hidden by files.exclude in your VS Code settings. Click to show them.")
+            }
             Spacer()
             Text("\(model.viewedCount)/\(model.files.count) viewed")
                 .foregroundColor(ReviewColors.secondary)
             ProgressView(value: Double(model.viewedCount), total: Double(max(model.files.count, 1)))
                 .frame(width: 50)
                 .tint(ReviewColors.addedText)
+            ReviewIconButton(
+                symbol: model.changesLayout == .tree ? "list.bullet" : "list.bullet.indent",
+                help: model.changesLayout == .tree ? "View as List" : "View as Tree"
+            ) {
+                model.changesLayout = model.changesLayout == .tree ? .list : .tree
+            }
         }
         .font(.system(size: 11, design: .monospaced))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .padding(.vertical, 2)
         .background(ReviewColors.surface.opacity(0.6))
+        .contentShape(Rectangle())
+        .contextMenu { ReviewLayoutMenu(model: model) }
+    }
+}
+
+/// The Changes tab's view options, for its right-click menus.
+private struct ReviewLayoutMenu: View {
+    @ObservedObject var model: ReviewModel
+
+    var body: some View {
+        Picker("View", selection: $model.changesLayout) {
+            Text("View as List").tag(ReviewModel.ChangesLayout.list)
+            Text("View as Tree").tag(ReviewModel.ChangesLayout.tree)
+        }
+        .pickerStyle(.inline)
+        .labelsHidden()
+        if model.changesLayout == .tree {
+            Divider()
+            Button("Collapse All") { model.collapseAll() }
+            Button("Expand All") { model.expandAll() }
+        }
+        Divider()
+        Toggle("Show Files Hidden by files.exclude", isOn: $model.showExcluded)
+    }
+}
+
+private struct ReviewFolderRow: View {
+    @ObservedObject var model: ReviewModel
+    let node: ReviewChangeNode
+    let depth: Int
+
+    @State private var hovering = false
+
+    private var open: Bool { !model.collapsed.contains(node.id) }
+
+    var body: some View {
+        let viewedCount = model.viewedCount(node)
+        let allViewed = viewedCount == node.files.count
+        HStack(spacing: 6) {
+            Button { model.toggleViewed(folder: node) } label: {
+                Image(systemName: allViewed ? "checkmark.square.fill" : viewedCount > 0 ? "minus.square.fill" : "square")
+                    .foregroundColor(viewedCount > 0 ? ReviewColors.addedText : ReviewColors.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(allViewed ? "Mark Folder as Not Viewed" : "Mark Folder as Viewed")
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(ReviewColors.secondary)
+                .rotationEffect(.degrees(open ? 90 : 0))
+                .frame(width: 10)
+            if let repo = node.repo {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 11))
+                    .foregroundColor(ReviewColors.accent)
+                Text(node.name)
+                    .fontWeight(.semibold)
+                    .foregroundColor(allViewed ? ReviewColors.secondary : ReviewColors.text)
+                    .lineLimit(1)
+                if let branch = model.repoStates[repo]?.branch {
+                    Text(branch)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(ReviewColors.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            } else {
+                Image(systemName: open ? "folder" : "folder.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(ReviewColors.accent.opacity(0.8))
+                Text(node.name)
+                    .foregroundColor(allViewed ? ReviewColors.secondary : ReviewColors.text)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 4)
+
+            Text("\(viewedCount)/\(node.files.count)").foregroundColor(ReviewColors.secondary)
+            Text("+\(node.added)").foregroundColor(ReviewColors.addedText)
+            Text("−\(node.removed)").foregroundColor(ReviewColors.removedText)
+        }
+        .font(.system(size: 12))
+        .padding(.leading, 10 + CGFloat(depth) * 14)
+        .padding(.trailing, 10)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(hovering ? ReviewColors.hovered : .clear)
+                .padding(.horizontal, 4))
+        .contentShape(Rectangle())
+        .onTapGesture { model.toggleCollapsed(node) }
+        .onHover { hovering = $0 }
+        .help(node.repo.flatMap { model.repo($0)?.root } ?? node.id)
+        .contextMenu {
+            Button(open ? "Collapse" : "Expand") { model.toggleCollapsed(node) }
+            Button(allViewed ? "Mark All as Not Viewed" : "Mark All as Viewed") {
+                model.toggleViewed(folder: node)
+            }
+            if let repo = node.repo {
+                Button("Show Only This Repository") { model.focusedRepo = repo }
+            }
+            Divider()
+            ReviewLayoutMenu(model: model)
+        }
     }
 }
 
 private struct ReviewFileRow: View {
     @ObservedObject var model: ReviewModel
     let file: ReviewFileDiff
+    /// How deep the file sits in the tree, or nil in the flat list.
+    var depth: Int?
 
     @State private var hovering = false
 
@@ -281,8 +489,10 @@ private struct ReviewFileRow: View {
 
             HStack(spacing: 0) {
                 Text(file.fileName).foregroundColor(model.isViewed(file) ? ReviewColors.secondary : ReviewColors.text)
-                Text(file.directory.isEmpty ? "" : "  " + file.directory)
-                    .foregroundColor(ReviewColors.secondary)
+                if depth == nil {
+                    Text(file.directory.isEmpty ? "" : "  " + file.directory)
+                        .foregroundColor(ReviewColors.secondary)
+                }
             }
             .lineLimit(1)
             .truncationMode(.head)
@@ -297,7 +507,10 @@ private struct ReviewFileRow: View {
             }
         }
         .font(.system(size: 12))
-        .padding(.horizontal, 10)
+        // In the tree, files line up under their folder's name, past the
+        // folder's chevron.
+        .padding(.leading, depth.map { 10 + CGFloat($0) * 14 + ($0 > 0 ? 16 : 0) } ?? 10)
+        .padding(.trailing, 10)
         .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 5)
@@ -307,6 +520,11 @@ private struct ReviewFileRow: View {
         .onTapGesture { model.viewer = .diff(file.path) }
         .onHover { hovering = $0 }
         .help(file.oldPath.map { "\($0) → \(file.path)" } ?? file.path)
+        .contextMenu {
+            Button(model.isViewed(file) ? "Mark as Not Viewed" : "Mark as Viewed") { model.toggleViewed(file) }
+            Divider()
+            ReviewLayoutMenu(model: model)
+        }
     }
 }
 
@@ -347,7 +565,13 @@ private struct ReviewFilesList: View {
 
             if model.fileQuery.trimmingCharacters(in: .whitespaces).isEmpty {
                 if model.tree.isEmpty {
-                    ReviewEmpty(symbol: "folder", title: "Loading files…", detail: "")
+                    VStack(spacing: 10) {
+                        if model.treeLoading || model.loading { ProgressView().controlSize(.small) }
+                        Text(model.treeLoading || model.loading ? "Listing files…" : "No files")
+                            .font(.system(size: 12))
+                            .foregroundColor(ReviewColors.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     // List is backed by an outline view, so only the rows on
                     // screen are built, even for very large repositories.
@@ -374,10 +598,11 @@ private struct ReviewTreeRow: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Image(systemName: node.isFolder ? "folder.fill" : "doc.text")
+            Image(systemName: node.repo != nil ? "arrow.triangle.branch" : node.isFolder ? "folder.fill" : "doc.text")
                 .font(.system(size: 11))
                 .foregroundColor(node.isFolder ? ReviewColors.accent.opacity(0.8) : ReviewColors.secondary)
             Text(node.name)
+                .fontWeight(node.repo != nil ? .semibold : .regular)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .foregroundColor(isOpen ? ReviewColors.accent : ReviewColors.text)
@@ -403,7 +628,8 @@ private struct ReviewTreeRow: View {
     }
 
     private var containsChanges: Bool {
-        model.statusByPath.keys.contains { $0.hasPrefix(node.id) }
+        if let prefix = node.repo, let repo = model.repo(prefix) { return model.changeCount(repo) > 0 }
+        return model.statusByPath.keys.contains { $0.hasPrefix(node.id) }
     }
 }
 
@@ -439,7 +665,9 @@ private struct ReviewViewer: View {
 
     @ViewBuilder
     private func content(path: String) -> some View {
-        if let note = model.viewerNote, model.rows.isEmpty {
+        if let preview = model.preview {
+            ReviewPreviewPane(preview: preview)
+        } else if let note = model.viewerNote, model.rows.isEmpty {
             ReviewEmpty(symbol: "doc", title: note, detail: "")
         } else {
             VStack(spacing: 0) {
@@ -454,6 +682,74 @@ private struct ReviewViewer: View {
                 ReviewCodeView(model: model, path: path)
             }
         }
+    }
+}
+
+/// Files that aren't text, through Quick Look: one side, or before and
+/// after when both exist.
+private struct ReviewPreviewPane: View {
+    let preview: ReviewPreview
+
+    var body: some View {
+        switch (preview.before, preview.after) {
+        case let (before?, after?):
+            HSplitView {
+                side("Before", before, id: preview.id)
+                side("After", after, id: preview.id)
+            }
+        case let (before?, nil):
+            side("Deleted", before, id: preview.id)
+        case let (nil, after?):
+            ReviewQuickLook(url: after, id: preview.id)
+        case (nil, nil):
+            ReviewEmpty(symbol: "doc", title: "Nothing to preview", detail: "")
+        }
+    }
+
+    private func side(_ label: String, _ url: URL, id: UUID) -> some View {
+        VStack(spacing: 0) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(ReviewColors.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(ReviewColors.surface)
+            ReviewQuickLook(url: url, id: id)
+        }
+        .frame(minWidth: 120)
+    }
+}
+
+private struct ReviewQuickLook: NSViewRepresentable {
+    let url: URL
+    let id: UUID
+
+    final class Coordinator {
+        var id: UUID?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> QLPreviewView {
+        let view = QLPreviewView(frame: .zero, style: .normal) ?? QLPreviewView()
+        view.autostarts = true
+        view.shouldCloseWithWindow = true
+        return view
+    }
+
+    func updateNSView(_ view: QLPreviewView, context: Context) {
+        guard context.coordinator.id != id else { return }
+        context.coordinator.id = id
+        if (view.previewItem as? URL) == url {
+            view.refreshPreviewItem()
+        } else {
+            view.previewItem = url as NSURL
+        }
+    }
+
+    static func dismantleNSView(_ view: QLPreviewView, coordinator: Coordinator) {
+        view.close()
     }
 }
 
@@ -521,9 +817,9 @@ private struct ReviewFileHeader: View {
                 }
                 .controlSize(.small)
             }
-            if let root = model.root {
+            if let url = model.url(for: path) {
                 ReviewIconButton(symbol: "arrow.up.forward.app", help: "Open in Default App") {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: root).appendingPathComponent(path))
+                    NSWorkspace.shared.open(url)
                 }
             }
         }

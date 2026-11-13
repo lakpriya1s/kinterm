@@ -58,6 +58,13 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
         return model
     }
 
+    /// The tab's review if it's been opened, without making one.
+    @MainActor
+    func existingModel(for controller: BaseTerminalController) -> ReviewModel? {
+        let model = models[ObjectIdentifier(controller)]
+        return model?.controller === controller ? model : nil
+    }
+
     func isPanelShown(for controller: BaseTerminalController?) -> Bool {
         guard let controller else { return false }
         return panels.contains(ObjectIdentifier(controller))
