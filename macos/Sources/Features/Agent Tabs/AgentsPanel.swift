@@ -494,7 +494,11 @@ final class AgentsPanel {
             .filter { $0.status.state == .blocked }
             .sorted { $0.location.localizedStandardCompare($1.location) == .orderedAscending }
         guard !waiting.isEmpty else { return false }
-        let current = NSApp.keyWindow?.windowController as? BaseTerminalController
+        var current = NSApp.keyWindow?.windowController as? BaseTerminalController
+        // In Grid View, the tab you're in is the tile with the keyboard.
+        if let window = NSApp.keyWindow, TerminalGridModel.shared.isActive(for: window) {
+            current = TerminalGridModel.shared.focusedController(in: window) ?? current
+        }
         let next: AgentRow
         if let current, let index = waiting.firstIndex(where: { $0.controller === current }) {
             next = waiting[(index + 1) % waiting.count]

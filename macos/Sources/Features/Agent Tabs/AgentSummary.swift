@@ -296,6 +296,16 @@ final class AgentSummary: NSObject, NSMenuDelegate {
 
     /// Bring a tab forward and focus the split whose agent it shows.
     static func focus(_ controller: BaseTerminalController) {
+        // In Grid View the tab is already on screen as a tile: move the
+        // keyboard there, rather than selecting its tab, which would move
+        // the grid to another window.
+        let grid = TerminalGridModel.shared
+        if let window = controller.gridWindow ?? controller.window, grid.isActive(for: window) {
+            grid.focus(controller)
+            NSApp.activate(ignoringOtherApps: true)
+            MainActor.assumeIsolated { TerminalGridAttention.shared.pulse(controller) }
+            return
+        }
         let target = controller.programStatus
         let surface = controller.surfaceTree.first { $0.programStatus == target } ?? controller.focusedSurface
         controller.window?.tabGroup?.selectedWindow = controller.window

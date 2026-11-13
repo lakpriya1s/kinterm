@@ -1759,7 +1759,10 @@ extension BaseTerminalController {
                 // A prompt starting: remember the tree for the review's
                 // "Last Turn" and "This Session".
                 ReviewSnapshots.shared.statusChanged(self, from: programStatus?.state, to: status?.state)
+                let old = programStatus?.state
                 programStatus = status
+                // In Grid View, maybe move the keyboard to this tile.
+                TerminalGridAttention.shared.statusChanged(self, from: old, to: status?.state)
                 (window as? TerminalWindow)?.programStatus = status
                 AgentTabBarModel.setNeedsRefresh()
             }

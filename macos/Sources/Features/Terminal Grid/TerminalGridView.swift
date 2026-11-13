@@ -95,6 +95,8 @@ private struct TerminalGridTile: View {
     let tab: AgentTab?
     let isFocused: Bool
 
+    @ObservedObject private var attention = TerminalGridAttention.shared
+
     private var accent: Color { tab?.color ?? Color.accentColor }
 
     var body: some View {
@@ -127,6 +129,11 @@ private struct TerminalGridTile: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(isFocused ? accent : AgentTabBarColors.border, lineWidth: isFocused ? 2 : 1)
                 .allowsHitTesting(false))
+        .overlay {
+            if let pulse = attention.pulsing, pulse.id == ObjectIdentifier(controller) {
+                TerminalGridPulse(color: accent, reason: pulse.reason)
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(tab?.title ?? "Tab")
     }

@@ -2312,6 +2312,9 @@ extension Ghostty.SurfaceView: NSTextInputClient {
         // All committed text (IME, dictation, etc.) must be sent as key
         // events so programs treat it as typed input, never as a paste.
         if !chars.isEmpty {
+            // Dictated text is a prompt being written: Grid View's
+            // auto-focus waits until it's sent.
+            TerminalGridAttention.shared.noteCommittedText(in: self)
             _ = committedTextAction(GHOSTTY_ACTION_PRESS, text: chars)
         }
     }
