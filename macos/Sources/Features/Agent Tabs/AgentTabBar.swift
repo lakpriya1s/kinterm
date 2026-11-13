@@ -887,9 +887,9 @@ private struct AgentPanelButtons: View {
 
     var body: some View {
         let window = controller?.gridWindow ?? controller?.window
-        let reviewOpen = controller.map { reviews.isPanelShown(for: $0) } == true
-            || reviews.gridReviewController(for: window) != nil
-        let browserOpen = browsers.panelPage(for: controller) != nil || browsers.gridPage(for: window) != nil
+        let reviewOpen = controller.map { reviews.isPanelShown(for: $0) || reviews.hasGridReview(of: $0, in: window) } == true
+        let browserOpen = browsers.panelPage(for: controller) != nil
+            || controller.map { browsers.gridPage(of: $0, in: window) != nil } == true
 
         AgentBarButton(
             symbol: "arrow.triangle.branch", size: size, active: reviewOpen,

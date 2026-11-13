@@ -26,6 +26,8 @@ struct ReviewView: View {
         VStack(spacing: 0) {
             ReviewHeader(model: model, presentation: presentation,
                          switchPresentation: switchPresentation, close: close)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
             Divider().overlay(ReviewColors.border)
                 .overlay(alignment: .top) {
                     // Something's being looked up: a thin moving bar, so a
@@ -34,9 +36,15 @@ struct ReviewView: View {
                         ReviewLoadingBar()
                     }
                 }
+            // When there's less room than the list and viewer want, they're
+            // cut off at the bottom rather than drawn over the header.
             content
+                .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
+                .clipped()
             Divider().overlay(ReviewColors.border)
             ReviewFooter(model: model)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
         }
         .background(ReviewColors.background)
         .foregroundColor(ReviewColors.text)
@@ -80,14 +88,14 @@ struct ReviewView: View {
 extension ReviewView {
     private func stacked<List: View>(_ list: List) -> some View {
         VSplitView {
-            list.frame(minHeight: 90, idealHeight: 200, maxHeight: .infinity)
-            ReviewViewer(model: model).frame(minHeight: 160, maxHeight: .infinity)
+            list.frame(minHeight: 60, idealHeight: 200, maxHeight: .infinity)
+            ReviewViewer(model: model).frame(minHeight: 80, maxHeight: .infinity)
         }
     }
 
     private func sideBySide<List: View>(_ list: List) -> some View {
         HSplitView {
-            list.frame(minWidth: 200, idealWidth: 280, maxWidth: 480)
+            list.frame(minWidth: 200, idealWidth: 280, maxWidth: 720)
             ReviewViewer(model: model).frame(minWidth: 320, maxWidth: .infinity)
         }
     }

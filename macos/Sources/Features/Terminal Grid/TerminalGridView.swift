@@ -14,28 +14,44 @@ struct TerminalGridView: View {
     /// The terminal with the keyboard, anywhere in the grid.
     let focusedSurface: Ghostty.SurfaceView?
 
-    /// Whether the grid has a review tile (⌘⇧R). See `ReviewCenter`.
+    /// The grid's review tiles (⌘⇧R), one per tab. See `ReviewCenter`.
     @ObservedObject private var review = ReviewCenter.shared
 
-    /// Whether the grid has a browser tile (⌘⇧B). See `BrowserCenter`.
+    /// The grid's browser tiles (⌘⇧B), one per tab. See `BrowserCenter`.
     @ObservedObject private var browsers = BrowserCenter.shared
 
     private static let gap: CGFloat = 6
 
-    /// A tile: a tab, the review of one, or the browser.
+    /// A tile: a tab, a tab's review, a browser, or a browser's DevTools.
     private enum Item: Hashable {
         case tab(BaseTerminalController)
-        case review
-        case browser
-        case devTools
+        case review(BaseTerminalController)
+        case browser(BrowserPage)
+        case devTools(BrowserPage)
+
+        private var key: (Int, ObjectIdentifier) {
+            switch self {
+            case .tab(let controller): return (0, ObjectIdentifier(controller))
+            case .review(let controller): return (1, ObjectIdentifier(controller))
+            case .browser(let page): return (2, ObjectIdentifier(page))
+            case .devTools(let page): return (3, ObjectIdentifier(page))
+            }
+        }
+
+        static func == (lhs: Item, rhs: Item) -> Bool { lhs.key == rhs.key }
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(key.0)
+            hasher.combine(key.1)
+        }
     }
 
     var body: some View {
         let window = controllers.first?.window
-        let reviewed = review.gridReviewController(for: window)
-        let browser = browsers.gridPage(for: window)
-        let items = controllers.map(Item.tab) + (reviewed == nil ? [] : [.review]) + (browser == nil ? [] : [.browser])
-            + (browser?.devTools == .docked ? [.devTools] : [])
+        let reviewed = review.gridReviewControllers(for: window)
+        let pages = browsers.gridPages(for: window)
+        let items = controllers.map(Item.tab)
+            + reviewed.map(Item.review)
+            + pages.flatMap { page in [Item.browser(page)] + (page.devTools == .docked ? [Item.devTools(page)] : []) }
         let count = items.count
         // As square as possible, wider than tall: 2 → 2×1, 3–4 → 2×2,
         // 5–6 → 3×2, 7–9 → 3×3.
@@ -52,21 +68,18 @@ struct TerminalGridView: View {
                                 controller: controller,
                                 tab: tab(for: controller),
                                 isFocused: focusedSurface.map { controller.surfaceTree.contains($0) } ?? false)
-                        case .review:
-                            if let reviewed, let window {
+                        case .review(let controller):
+                            if let window {
                                 ReviewGridTile(
-                                    model: review.model(for: reviewed),
-                                    tab: tab(for: reviewed),
+                                    model: review.model(for: controller),
+                                    controller: controller,
+                                    tab: tab(for: controller),
                                     window: window)
                             }
-                        case .browser:
-                            if let browser, let window {
-                                BrowserGridTile(page: browser, window: window)
-                            }
-                        case .devTools:
-                            if let browser {
-                                DevToolsGridTile(page: browser)
-                            }
+                        case .browser(let page):
+                            BrowserGridTile(page: page, tab: browsers.owner(of: page).flatMap(tab(for:)))
+                        case .devTools(let page):
+                            DevToolsGridTile(page: page)
                         }
                     }
                 }
@@ -74,12 +87,6 @@ struct TerminalGridView: View {
         }
         .padding(Self.gap)
         .background(AgentTabBarColors.bar)
-        .onChange(of: focusedSurface) { surface in
-            // The review tile reviews the agent tile you're in.
-            guard reviewed != nil, let window, let surface,
-                  let owner = BaseTerminalController.controller(owning: surface) else { return }
-            review.gridFocusChanged(to: owner, in: window)
-        }
     }
 
     private func tab(for controller: BaseTerminalController) -> AgentTab? {
@@ -145,10 +152,11 @@ private struct TerminalGridTile: View {
     }
 }
 
-/// The review tile (⌘⇧R): the changes of the agent tile you were last in.
-/// See `ReviewCenter`.
+/// A review tile (⌘⇧R): the changes of the tab it was opened for. See
+/// `ReviewCenter`.
 private struct ReviewGridTile: View {
     @ObservedObject var model: ReviewModel
+    let controller: BaseTerminalController
     let tab: AgentTab?
     let window: NSWindow
 
@@ -177,19 +185,19 @@ private struct ReviewGridTile: View {
                     .font(.system(size: 10))
                     .foregroundColor(AgentTabBarColors.cardMuted)
                 TerminalGridHeaderButton(symbol: "macwindow.on.rectangle", help: "Open Review in Its Own Window") {
-                    ReviewCenter.shared.popOutGridReview(for: window)
+                    ReviewCenter.shared.popOutGridReview(of: controller, in: window)
                 }
                 TerminalGridHeaderButton(symbol: "xmark", help: "Close Review (⌘⇧R)") {
-                    ReviewCenter.shared.closeGridReview(for: window)
+                    ReviewCenter.shared.closeGridReview(of: controller, in: window)
                 }
             }
             .padding(.horizontal, 8)
             .frame(height: 24)
             .background(AgentTabBarColors.card)
-            .help("Reviews the agent tile you were last in")
+            .help("Reviews \(tab?.title ?? model.tabTitle)")
 
             ReviewView(model: model, presentation: .tile, close: {
-                ReviewCenter.shared.closeGridReview(for: window)
+                ReviewCenter.shared.closeGridReview(of: controller, in: window)
             })
         }
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -202,10 +210,10 @@ private struct ReviewGridTile: View {
     }
 }
 
-/// The browser tile (⌘⇧B). See `BrowserCenter`.
+/// A browser tile (⌘⇧B), opened for a tab. See `BrowserCenter`.
 private struct BrowserGridTile: View {
     @ObservedObject var page: BrowserPage
-    let window: NSWindow
+    let tab: AgentTab?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -216,6 +224,9 @@ private struct BrowserGridTile: View {
                 Text("Browser")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(AgentTabBarColors.cardTitle)
+                if let color = tab?.color {
+                    Circle().fill(color).frame(width: 7, height: 7)
+                }
                 Text(page.displayTitle)
                     .font(.system(size: 11))
                     .foregroundColor(AgentTabBarColors.cardMuted)
@@ -231,7 +242,7 @@ private struct BrowserGridTile: View {
                     BrowserCenter.shared.popOut(page)
                 }
                 TerminalGridHeaderButton(symbol: "xmark", help: "Close Browser (⌘⇧B)") {
-                    BrowserCenter.shared.closeGridTile(in: window)
+                    BrowserCenter.shared.closeGridTile(page)
                 }
             }
             .padding(.horizontal, 8)
@@ -239,7 +250,7 @@ private struct BrowserGridTile: View {
             .background(AgentTabBarColors.card)
 
             BrowserView(page: page, placement: .tile, close: {
-                BrowserCenter.shared.closeGridTile(in: window)
+                BrowserCenter.shared.closeGridTile(page)
             })
         }
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))

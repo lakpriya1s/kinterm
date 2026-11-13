@@ -3,8 +3,8 @@ import SwiftUI
 
 // Where reviews are shown: beside a tab's terminal or in their own window,
 // one review per tab. ⌘⇧R (View › Review Changes) toggles the review for the
-// focused tab. In Grid View there's no room beside the terminals, so the
-// review is one more tile in the grid, reviewing the agent tile you were last
+// focused tab. In Grid View there's no room beside the terminals, so a
+// review is one more tile in the grid: one per tab, opened for the tile you're
 // in. See scope/designs/08-code-review.md.
 
 // Not main-actor isolated as a whole, like TerminalGridModel, so the tab bar
@@ -30,8 +30,9 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "ReviewPresentation") }
     }
 
-    /// Grids with a review tile, by tab group, with the tab under review.
-    @Published private(set) var gridReviews: [ObjectIdentifier: Weak<BaseTerminalController>] = [:]
+    /// Review tiles, by grid (tab group): the tabs under review, in the
+    /// order their tiles were opened.
+    @Published private(set) var gridReviews: [ObjectIdentifier: [Weak<BaseTerminalController>]] = [:]
 
     private var models: [ObjectIdentifier: ReviewModel] = [:]
     private var windows: [ObjectIdentifier: NSWindow] = [:]
@@ -85,8 +86,8 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
     @MainActor
     func toggle(for controller: BaseTerminalController) {
         if inGrid(controller), let window = controller.gridWindow ?? controller.window {
-            if gridReviewController(for: window) != nil {
-                closeGridReview(for: window)
+            if hasGridReview(of: controller, in: window) {
+                closeGridReview(of: controller, in: window)
             } else {
                 openGridReview(of: controller, in: window)
             }
@@ -165,63 +166,59 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
         ObjectIdentifier(TerminalGridModel.groupObject(for: window))
     }
 
-    /// The tab the window's review tile is reviewing, if the grid has one.
-    func gridReviewController(for window: NSWindow?) -> BaseTerminalController? {
-        guard let window, TerminalGridModel.shared.isActive(for: window) else { return nil }
-        return gridReviews[Self.gridKey(window)]?.value
+    /// The tabs the window's review tiles are reviewing, in tile order.
+    func gridReviewControllers(for window: NSWindow?) -> [BaseTerminalController] {
+        guard let window, TerminalGridModel.shared.isActive(for: window) else { return [] }
+        return (gridReviews[Self.gridKey(window)] ?? []).compactMap(\.value)
     }
 
-    /// Add a review tile to the window's grid.
+    /// Whether the tab has a review tile in the window's grid.
+    func hasGridReview(of controller: BaseTerminalController, in window: NSWindow?) -> Bool {
+        gridReviewControllers(for: window).contains { $0 === controller }
+    }
+
+    private func setGridReviews(_ window: NSWindow, _ change: (inout [Weak<BaseTerminalController>]) -> Void) {
+        let key = Self.gridKey(window)
+        var list = (gridReviews[key] ?? []).filter { $0.value != nil }
+        change(&list)
+        gridReviews[key] = list.isEmpty ? nil : list
+        TerminalGridModel.shared.changed()
+        // Tiles move when one comes or goes; the grid re-syncs its
+        // terminals on tab bar changes.
+        AgentTabBarModel.setNeedsRefresh()
+    }
+
+    /// Add a review tile for the tab to the window's grid, beside any
+    /// other tabs' reviews.
     @MainActor
     func openGridReview(of controller: BaseTerminalController, in window: NSWindow) {
         let id = ObjectIdentifier(controller)
         panels.remove(id)
         windows[id]?.close()
-        gridReviews[Self.gridKey(window)] = Weak(controller)
-        model(for: controller).refresh()
-        TerminalGridModel.shared.changed()
-        // Tiles move when one comes or goes; the grid re-syncs its
-        // terminals on tab bar changes.
-        AgentTabBarModel.setNeedsRefresh()
-    }
-
-    /// Take the review tile out of the grid and give the keyboard back to
-    /// the tab it was reviewing.
-    @MainActor
-    func closeGridReview(for window: NSWindow) {
-        let controller = gridReviews.removeValue(forKey: Self.gridKey(window))?.value
-        TerminalGridModel.shared.changed()
-        // Tiles move when one comes or goes; the grid re-syncs its
-        // terminals on tab bar changes.
-        AgentTabBarModel.setNeedsRefresh()
-        if let controller { TerminalGridModel.shared.focus(controller) }
-    }
-
-    /// The review tile follows the agent tile you're in.
-    @MainActor
-    func gridFocusChanged(to controller: BaseTerminalController, in window: NSWindow) {
-        let key = Self.gridKey(window)
-        guard let current = gridReviews[key], current.value !== controller else { return }
-        gridReviews[key] = Weak(controller)
+        guard !hasGridReview(of: controller, in: window) else { return }
+        setGridReviews(window) { $0.append(Weak(controller)) }
         model(for: controller).refresh()
     }
 
-    /// Move the review tile into its own window.
+    /// Take the tab's review tile out of the grid and give the keyboard
+    /// back to the tab.
     @MainActor
-    func popOutGridReview(for window: NSWindow) {
-        guard let controller = gridReviewController(for: window) else { return }
-        gridReviews[Self.gridKey(window)] = nil
-        TerminalGridModel.shared.changed()
-        // Tiles move when one comes or goes; the grid re-syncs its
-        // terminals on tab bar changes.
-        AgentTabBarModel.setNeedsRefresh()
+    func closeGridReview(of controller: BaseTerminalController, in window: NSWindow) {
+        setGridReviews(window) { $0.removeAll { $0.value === controller } }
+        TerminalGridModel.shared.focus(controller)
+    }
+
+    /// Move the tab's review tile into its own window.
+    @MainActor
+    func popOutGridReview(of controller: BaseTerminalController, in window: NSWindow) {
+        setGridReviews(window) { $0.removeAll { $0.value === controller } }
         showWindow(for: controller)
     }
 
     /// After comments are typed into the agent's prompt, show that prompt.
     @MainActor
     func didSend(from controller: BaseTerminalController, to surface: Ghostty.SurfaceView) {
-        if let window = controller.gridWindow ?? controller.window, gridReviewController(for: window) != nil {
+        if let window = controller.gridWindow ?? controller.window, hasGridReview(of: controller, in: window) {
             // The agent's tile is right there in the grid.
             Ghostty.moveFocus(to: surface, delay: 0.05)
             return
@@ -245,6 +242,11 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
         windows.removeValue(forKey: id)?.close()
         models[id] = nil
         ReviewSnapshots.shared.forget(controller)
+        // Its review tile goes too.
+        for (key, list) in gridReviews where list.contains(where: { $0.value === controller || $0.value == nil }) {
+            let rest = list.filter { $0.value != nil && $0.value !== controller }
+            gridReviews[key] = rest.isEmpty ? nil : rest
+        }
     }
 
     // MARK: Menu
@@ -271,7 +273,6 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
             return models[id]?.controller
         }
         guard let controller = window.windowController as? BaseTerminalController else { return nil }
-        if let reviewed = gridReviewController(for: window) { return reviewed }
         if TerminalGridModel.shared.isActive(for: window),
            let focused = TerminalGridModel.shared.focusedController(in: window) {
             return focused
@@ -291,7 +292,7 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
             menuItem.title = "Review Changes"
             return false
         }
-        if let window = controller.gridWindow ?? controller.window, gridReviewController(for: window) != nil {
+        if let window = controller.gridWindow ?? controller.window, hasGridReview(of: controller, in: window) {
             menuItem.title = "Remove Review Tile"
         } else {
             menuItem.title = isPanelShown(for: controller) || isWindowShown(for: controller)
@@ -310,54 +311,146 @@ struct ReviewPanelHost<Content: View>: View {
 
     var body: some View {
         // Always an HStack, so showing the panel doesn't rebuild the
-        // terminals.
-        HStack(spacing: 0) {
-            content()
-            if let controller, center.isPanelShown(for: controller) {
-                PanelResizeHandle(width: $center.panelWidth)
-                ReviewView(
-                    model: center.model(for: controller),
-                    presentation: .panel,
-                    switchPresentation: { [weak controller] in
-                        guard let controller else { return }
-                        ReviewCenter.shared.showWindow(for: controller)
-                    },
-                    close: { [weak controller] in
-                        guard let controller else { return }
-                        ReviewCenter.shared.hidePanel(for: controller)
-                    })
-                .frame(width: center.panelWidth)
-                .transition(.move(edge: .trailing))
+        // terminals. The panel gets an exact width, measured here: left to
+        // the HStack, it got no more than half, because the terminal's own
+        // size counted as much as the panel's.
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                content()
+                    .frame(minWidth: 0, maxWidth: .infinity)
+                if let controller, center.isPanelShown(for: controller) {
+                    PanelResizeHandle(width: $center.panelWidth, defaultWidth: 460)
+                        .zIndex(1)
+                    ReviewView(
+                        model: center.model(for: controller),
+                        presentation: .panel,
+                        switchPresentation: { [weak controller] in
+                            guard let controller else { return }
+                            ReviewCenter.shared.showWindow(for: controller)
+                        },
+                        close: { [weak controller] in
+                            guard let controller else { return }
+                            ReviewCenter.shared.hidePanel(for: controller)
+                        })
+                    .frame(width: PanelResizeHandle.fit(center.panelWidth, in: geometry.size.width))
+                    // At its narrowest the header is wider than the panel;
+                    // it mustn't spill over the edge and take its clicks.
+                    .clipped()
+                    .transition(.move(edge: .trailing))
+                }
             }
         }
     }
 }
 
 /// The edge between the terminal and a side panel (review, browser): drag
-/// to resize.
+/// to resize, double-click to go back to the default width.
 struct PanelResizeHandle: View {
     @Binding var width: CGFloat
+    let defaultWidth: CGFloat
 
-    @State private var start: CGFloat?
-    @State private var hovering = false
+    static let panelMinWidth: CGFloat = 320
+    static let terminalMinWidth: CGFloat = 240
+
+    /// A panel's width in `total` points beside a terminal: what it was
+    /// dragged to, or less when that leaves the terminal too little.
+    static func fit(_ width: CGFloat, in total: CGFloat) -> CGFloat {
+        max(panelMinWidth, min(width, total - terminalMinWidth - 5))
+    }
+
+    @State private var active = false
 
     var body: some View {
         Rectangle()
-            .fill(hovering || start != nil ? ReviewColors.accent.opacity(0.6) : ReviewColors.border)
+            .fill(active ? ReviewColors.accent.opacity(0.6) : ReviewColors.border)
             .frame(width: 1)
             .padding(.horizontal, 2)
-            .contentShape(Rectangle())
-            .onHover { inside in
-                hovering = inside
-                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            // The terminal next to it is an AppKit view and would take the
+            // mouse and set its own cursor from a SwiftUI gesture, so the
+            // edge is an AppKit view too, a little wider than it looks.
+            .overlay(
+                PanelResizeEdge(width: $width, defaultWidth: defaultWidth, active: $active)
+                    .padding(.horizontal, -3))
+    }
+}
+
+private struct PanelResizeEdge: NSViewRepresentable {
+    @Binding var width: CGFloat
+    let defaultWidth: CGFloat
+    @Binding var active: Bool
+
+    func makeNSView(context: Context) -> EdgeView { EdgeView() }
+
+    func updateNSView(_ view: EdgeView, context: Context) {
+        view.width = { width }
+        view.setWidth = { width = $0 }
+        view.defaultWidth = defaultWidth
+        view.setActive = { value in if active != value { active = value } }
+    }
+
+    final class EdgeView: NSView {
+        var width: () -> CGFloat = { 0 }
+        var setWidth: (CGFloat) -> Void = { _ in }
+        var defaultWidth: CGFloat = 460
+        var setActive: (Bool) -> Void = { _ in }
+
+        private var start: (mouse: CGFloat, width: CGFloat)?
+        private var hovering = false { didSet { update() } }
+        private var tracking: NSTrackingArea?
+
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .resizeLeftRight)
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let tracking { removeTrackingArea(tracking) }
+            let area = NSTrackingArea(
+                rect: bounds,
+                options: [.mouseEnteredAndExited, .cursorUpdate, .activeAlways, .inVisibleRect],
+                owner: self)
+            addTrackingArea(area)
+            tracking = area
+        }
+
+        override func cursorUpdate(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+        override func mouseEntered(with event: NSEvent) { hovering = true }
+        override func mouseExited(with event: NSEvent) { hovering = false }
+
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount == 2 {
+                setWidth(clamp(defaultWidth))
+                start = nil
+                return
             }
-            .gesture(
-                DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                    .onChanged { value in
-                        let from = start ?? width
-                        if start == nil { start = width }
-                        width = min(1400, max(320, from - value.translation.width))
-                    }
-                    .onEnded { _ in start = nil })
+            start = (event.locationInWindow.x, width())
+            update()
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let start else { return }
+            NSCursor.resizeLeftRight.set()
+            // The panel is on the right: dragging left makes it wider.
+            setWidth(clamp(start.width - (event.locationInWindow.x - start.mouse)))
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            start = nil
+            update()
+        }
+
+        /// No narrower than a panel can be, and no wider than leaves room
+        /// for the terminal.
+        private func clamp(_ value: CGFloat) -> CGFloat {
+            let available = (window?.contentView?.bounds.width ?? 10_000) - PanelResizeHandle.terminalMinWidth
+            return max(PanelResizeHandle.panelMinWidth, min(value, available))
+        }
+
+        private func update() {
+            setActive(hovering || start != nil)
+        }
     }
 }
