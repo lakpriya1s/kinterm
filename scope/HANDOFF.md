@@ -72,10 +72,33 @@ internals keep their names so upstream merges still work:
   (`OnboardingFeaturesSeen`; bump `OnboardingController.features` for the
   next one; `KINTERM_WHATS_NEW=1` forces it in debug builds).
 - Grid View (`Features/Terminal Grid/`, ⌘⇧E): every tab of a window as a
-  live tile.
+  live tile. `TerminalGridAttention` moves the keyboard to a tile whose
+  agent needs you (setting `GridAutoFocus`: off, waiting (default),
+  waiting or finished; tab bar menu › Grid View). It waits while you're
+  composing in the current tile: typed or dictated text until Return, Esc,
+  ⌃C or that tile's agent starting to work (which is how voice sends show
+  up), and while the default microphone is running anywhere (CoreAudio
+  `DeviceIsRunningSomewhere`). Decisions log at debug level to
+  `com.kinterm.app` / `grid-attention`
+  (`/usr/bin/log stream --level debug --predicate 'category == "grid-attention"'`).
+  ⌘J (`AgentsPanel.jumpToNextWaiting`) focuses the tile in a grid.
+- Tab bar buttons (`AgentPanelButtons` in `AgentTabBar.swift`): Grid,
+  Review and Browser pinned to the bar's far end, lit while open; Review's
+  badge is the change count of a review already opened in that tab.
 - Code Review (`Features/Code Review/`, ⌘⇧R): diffs of the focused tab's
   repository beside the terminal, in a window, or as a grid tile. Design:
-  [designs/08-code-review.md](designs/08-code-review.md).
+  [designs/08-code-review.md](designs/08-code-review.md). Changes as a list
+  or a tree (`ReviewChangeNode`, `ReviewChangesLayout` default tree), with
+  folders collapsed and marked viewed as a whole. `ReviewWorkspace` decides
+  the repositories: a `.code-workspace` (JSONC) at or above the repo whose
+  `folders` include it, else repos nested in it (`git.autoRepositoryDetection`,
+  `git.repositoryScanMaxDepth`, `…IgnoredFolders`, `git.ignoredRepositories`).
+  Every path in the review is workspace-relative; `ReviewFileDiff.repo` is
+  its repository's prefix and `gitPath` the path git knows. `files.exclude`
+  (VS Code defaults, workspace, then folder `.vscode/settings.json`) hides
+  files; plain and `**/name` patterns skip the regex, which matters with
+  hundreds of thousands of untracked files. Non-text files preview with
+  Quick Look, before and after for changed ones (`ReviewGit.export`).
 - Browser (`Features/Browser/`, `macos/Browser/`, ⌘⇧B): Chromium (CEF) in a
   module loaded with `dlopen` on first use, the `kinterm-browser` CLI and
   MCP server, agent cursor and glow. Built by `macos/Browser/build.sh`,

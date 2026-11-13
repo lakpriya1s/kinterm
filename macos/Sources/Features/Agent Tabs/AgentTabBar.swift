@@ -166,6 +166,25 @@ final class AgentTabBarSettings: ObservableObject {
     private static let accountStyleKey = "AgentAccountStyle"
     private static let menuBarKey = "AgentMenuBarSummary"
     private static let menuBarStyleKey = "AgentMenuBarStyle"
+    private static let gridAutoFocusKey = "GridAutoFocus"
+
+    /// In Grid View, whether the keyboard moves to a tile whose agent needs
+    /// you. See `TerminalGridAttention`.
+    enum GridAutoFocus: String, CaseIterable {
+        case off
+        /// Waiting on a permission prompt or a question. The default.
+        case waiting
+        /// Waiting, finished, or failed.
+        case waitingOrFinished
+
+        var label: String {
+            switch self {
+            case .off: return "Off"
+            case .waiting: return "When an Agent Is Waiting on You"
+            case .waitingOrFinished: return "When an Agent Is Waiting or Finishes"
+            }
+        }
+    }
 
     /// How much room the menu bar summary takes.
     enum MenuBarStyle: String, CaseIterable {
@@ -232,6 +251,10 @@ final class AgentTabBarSettings: ObservableObject {
         }
     }
 
+    @Published var gridAutoFocus: GridAutoFocus {
+        didSet { UserDefaults.ghostty.set(gridAutoFocus.rawValue, forKey: Self.gridAutoFocusKey) }
+    }
+
     /// Whether our own tab bar replaces the native one.
     var replacesNativeTabBar: Bool { position != .native }
 
@@ -248,6 +271,8 @@ final class AgentTabBarSettings: ObservableObject {
         showsMenuBarSummary = UserDefaults.ghostty.object(forKey: Self.menuBarKey) as? Bool ?? true
         menuBarStyle = UserDefaults.ghostty.string(forKey: Self.menuBarStyleKey)
             .flatMap(MenuBarStyle.init(rawValue:)) ?? .compact
+        gridAutoFocus = UserDefaults.ghostty.string(forKey: Self.gridAutoFocusKey)
+            .flatMap(GridAutoFocus.init(rawValue:)) ?? .waiting
     }
 }
 
@@ -521,8 +546,7 @@ struct AgentTabBar: View {
     /// gets the rest.
     private var facesWidth: CGFloat {
         let count = CGFloat(model.tabs.count)
-        let grid = model.tabs.count > 1 || model.gridActive ? 6 + (slot * 0.7).rounded() : 0
-        return 20 + count * (button + 6) + 4 + (slot * 0.7).rounded() + grid
+        return 20 + count * (button + 6) + 4 + (slot * 0.7).rounded()
     }
 
     var body: some View {
@@ -539,9 +563,18 @@ struct AgentTabBar: View {
                         .padding(.horizontal, 12)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         .background(AgentWindowDragArea())
+                    panelButtons.padding(.trailing, 10)
+                }
+            } else if vertical {
+                VStack(spacing: 0) {
+                    faces
+                    panelButtons.padding(.bottom, 12)
                 }
             } else {
-                faces
+                HStack(spacing: 0) {
+                    faces
+                    panelButtons.padding(.trailing, 10)
+                }
             }
         }
         .frame(
@@ -555,6 +588,22 @@ struct AgentTabBar: View {
         }
         .contextMenu { AgentTabBarMenu() }
         .onAppear { model.refresh() }
+    }
+
+    /// Grid, Review and Browser: about the window rather than one tab, so
+    /// pinned to the bar's far end where they don't scroll away with the tabs.
+    private var panelButtons: some View {
+        let layout = vertical
+            ? AnyLayout(VStackLayout(spacing: 6))
+            : AnyLayout(HStackLayout(spacing: 6))
+        return layout {
+            if model.tabs.count > 1 || model.gridActive {
+                AgentGridButton(size: (slot * 0.7).rounded(), active: model.gridActive) {
+                    model.toggleGrid()
+                }
+            }
+            AgentPanelButtons(controller: model.terminalController, size: (slot * 0.7).rounded())
+        }
     }
 
     /// The faces and the `+` button, scrolling when they don't fit.
@@ -580,12 +629,6 @@ struct AgentTabBar: View {
                     AgentMenuPanel.shared.toggle(for: controller, barEdge: edge, anchor: anchor)
                 }
                 .padding(vertical ? .top : .leading, 4)
-
-                if model.tabs.count > 1 || model.gridActive {
-                    AgentGridButton(size: (slot * 0.7).rounded(), active: model.gridActive) {
-                        model.toggleGrid()
-                    }
-                }
             }
             .padding(vertical
                 ? EdgeInsets(top: 12, leading: 8, bottom: 12, trailing: 8)
@@ -655,6 +698,14 @@ struct AgentTabBarMenu: View {
             }
         }
         AgentSoundsMenu()
+        Menu("Grid View") {
+            Picker("Focus Tiles Automatically", selection: $settings.gridAutoFocus) {
+                ForEach(AgentTabBarSettings.GridAutoFocus.allCases, id: \.self) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .pickerStyle(.inline)
+        }
     }
 }
 
@@ -823,6 +874,88 @@ private struct AgentNewTabButton: View {
         .onHover { hovering = $0 }
         .background(AgentScreenAnchorView(anchor: anchor))
         .accessibilityLabel("New Tab Menu")
+    }
+}
+
+/// Opens and closes the tab's review and browser, lit while they're open.
+private struct AgentPanelButtons: View {
+    let controller: BaseTerminalController?
+    let size: CGFloat
+
+    @ObservedObject private var reviews = ReviewCenter.shared
+    @ObservedObject private var browsers = BrowserCenter.shared
+
+    var body: some View {
+        let window = controller?.gridWindow ?? controller?.window
+        let reviewOpen = controller.map { reviews.isPanelShown(for: $0) } == true
+            || reviews.gridReviewController(for: window) != nil
+        let browserOpen = browsers.panelPage(for: controller) != nil || browsers.gridPage(for: window) != nil
+
+        AgentBarButton(
+            symbol: "arrow.triangle.branch", size: size, active: reviewOpen,
+            badge: controller.flatMap { reviews.existingModel(for: $0) },
+            help: reviewOpen ? "Hide Review (⌘⇧R)" : "Review Changes (⌘⇧R)"
+        ) {
+            if let controller { reviews.toggle(for: controller) }
+        }
+        AgentBarButton(
+            symbol: "globe", size: size, active: browserOpen, badge: nil,
+            help: browserOpen ? "Hide Browser (⌘⇧B)" : "Show Browser (⌘⇧B)"
+        ) {
+            if let controller { browsers.toggle(for: controller) }
+        }
+    }
+}
+
+/// A round button in the bar's style, with an optional count of changes.
+private struct AgentBarButton: View {
+    let symbol: String
+    let size: CGFloat
+    let active: Bool
+    let badge: ReviewModel?
+    let help: String
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: size * 0.4, weight: .regular))
+                .foregroundColor(hovering || active ? AgentTabBarColors.plusTextHovered : AgentTabBarColors.plusText)
+                .frame(width: size, height: size)
+                .background(Circle().fill(active ? AgentTabBarColors.selected : .clear))
+                .overlay(
+                    Circle().strokeBorder(
+                        hovering || active ? AgentTabBarColors.plusBorderHovered : AgentTabBarColors.plusBorder,
+                        lineWidth: 1.5))
+                .overlay(alignment: .topTrailing) {
+                    if let badge { AgentChangeBadge(model: badge).offset(x: 6, y: -4) }
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+/// How many files the tab's review last found changed.
+private struct AgentChangeBadge: View {
+    @ObservedObject var model: ReviewModel
+
+    var body: some View {
+        let count = model.files.count
+        if count > 0 {
+            Text(count > 999 ? "999+" : "\(count)")
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .padding(.horizontal, 4)
+                .frame(minWidth: 15, minHeight: 15)
+                .background(Capsule().fill(Color.accentColor))
+                .fixedSize()
+        }
     }
 }
 
