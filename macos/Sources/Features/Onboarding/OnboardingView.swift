@@ -349,12 +349,12 @@ private struct OnboardingTools: View {
             HStack(alignment: .top, spacing: 12) {
                 OnboardingTool(
                     title: "Grid View", keys: "⌘⇧E",
-                    text: "Every tab as a live tile, so all your agents are on screen.") {
+                    text: "Every tab as a live tile. The keyboard moves to the agent that needs you.") {
                     OnboardingGridSketch()
                 }
                 OnboardingTool(
                     title: "Review Changes", keys: "⌘⇧R",
-                    text: "GitHub-style diffs of what an agent changed. Revert a hunk, or comment back.") {
+                    text: "GitHub-style diffs in a folder tree, across a workspace's repos. Revert, or comment back.") {
                     OnboardingDiffSketch()
                 }
                 OnboardingTool(

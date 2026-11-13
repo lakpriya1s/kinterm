@@ -61,13 +61,14 @@ A tab with splits shows its most urgent agent: waiting, then error, done, workin
 | 🔔 | **Notifications** when an agent finishes, needs you or fails while you're somewhere else |
 | 🚦 | **The app icon is a status light.** The dock icon takes the colour and expression of the agent that needs you most, with a badge for how many are waiting |
 | 📊 | **Menu bar summary.** A live count of your agents from anywhere, in Compact, Full or Icon only style |
-| 🧭 | **Agents panel.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>A</kbd> lists every agent in every window, most urgent first. <kbd>⌘</kbd><kbd>J</kbd> jumps straight to the next one waiting on you |
+| 🧭 | **Agents panel.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>A</kbd> lists every agent in every window, most urgent first. <kbd>⌘</kbd><kbd>J</kbd> jumps straight to the next one waiting on you, in Grid View too |
 | 👥 | **Several Claude accounts.** Each account gets a colour, as a tint or a ring on its tabs. The `+` menu and <kbd>⌥</kbd><kbd>⌘</kbd><kbd>1</kbd>–<kbd>9</kbd> open a Claude Code tab with a given account, optionally in a new git worktree |
 | 🧩 | **Subagents.** A small badge counts the subagents a session is running |
 | 🪄 | **Setup Assistant.** On first launch, pick your faces, size and tab bar by looking at them, and it installs the Claude Code hook for you. After an update it shows what's new, once |
-| ▦ | **Grid View.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>E</kbd> shows every tab of a window as a live tile, so all your agents are on screen at once |
-| ✅ | **Review Changes.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd> shows what an agent changed as GitHub-style diffs. [More below](#work-alongside-your-agents) |
+| ▦ | **Grid View.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>E</kbd> shows every tab of a window as a live tile, so all your agents are on screen at once. When one needs you, the keyboard moves to it, once you've sent what you were typing or saying. [More below](#work-alongside-your-agents) |
+| ✅ | **Review Changes.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd> shows what an agent changed as GitHub-style diffs, in a folder tree, across every repo of a VS Code workspace. [More below](#work-alongside-your-agents) |
 | 🌐 | **A browser agents can use.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>B</kbd> opens your dev server beside the terminal, with Chrome's DevTools. [More below](#work-alongside-your-agents) |
+| 🔘 | **Buttons for the tools.** Grid View, Review Changes and the browser sit at the end of the tab bar, lit while open, with a count of changed files on Review |
 | 🎨 | **Tab colours.** Right-click a tab, or an account, to give it a colour |
 | 📡 | **An open protocol.** Any agent or script can report its state with [OSC 7501](#any-agent-osc-7501) |
 | 🔄 | **Updates itself.** New versions arrive in the app, no reinstalling |
@@ -82,6 +83,26 @@ everything uncommitted, everything this session, or just the agent's last turn. 
 hunk or a file, mark files as viewed, and leave comments on lines; **Send** types them
 into the agent's prompt for you to send. It opens beside the terminal, in its own window,
 or as one more tile in Grid View.
+
+- **List or tree.** Right-click the file list (or use its button) for **View as Tree**,
+  the default: folders you can collapse, each with its +/− and how many files you've
+  viewed. **Mark Folder as Viewed** ticks a whole folder and puts it away, like the build
+  output an agent left behind. Folders that only hold one folder share a row, as in VS Code.
+- **Workspaces with several repos.** If the folder has a VS Code `.code-workspace` file,
+  Review Changes covers every repository in its `folders`, each a group with its name and
+  branch, and the header becomes a menu to show just one. Without a workspace file it
+  finds repositories cloned inside the one you're in, like VS Code's
+  `git.autoRepositoryDetection`. `files.exclude` (from the workspace and each folder's
+  `.vscode/settings.json`) hides files in both tabs; **N excluded** shows them again.
+- **Images and other files.** Files that aren't text show with Quick Look: images,
+  PDFs, video, fonts. A changed one shows **Before** and **After** side by side.
+
+**Grid View** (<kbd>⌘</kbd><kbd>⇧</kbd><kbd>E</kbd>) moves the keyboard to a tile whose
+agent is waiting on you, and the tile pulses to say why. It never takes the keyboard while
+you're mid-prompt: it waits until you send, whether you press Return or send by voice, and
+while any app has the microphone open. It won't leave a tile whose own agent is waiting on
+you. Right-click the tab bar › **Grid View** › **Focus Tiles Automatically** to turn it
+off, or to include agents that finish. <kbd>⌘</kbd><kbd>J</kbd> does it by hand.
 
 **The browser** (<kbd>⌘</kbd><kbd>⇧</kbd><kbd>B</kbd>) shows your dev server beside the
 terminal: type `3000` or `localhost:5173` in its address bar, run
