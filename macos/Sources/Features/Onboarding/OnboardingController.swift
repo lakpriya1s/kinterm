@@ -16,13 +16,13 @@ final class OnboardingController: NSWindowController, NSWindowDelegate {
     /// page existed see it once, alone, as "What's New". Bump with a new
     /// page and list it in `OnboardingView.Mode.whatsNew`.
     private static let featuresKey = "OnboardingFeaturesSeen"
-    private static let features = 1
+    private static let features = 2
 
     private var mode: OnboardingView.Mode = .setup
 
     private init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 600),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: true)

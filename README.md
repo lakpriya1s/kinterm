@@ -69,6 +69,8 @@ A tab with splits shows its most urgent agent: waiting, then error, done, workin
 | ✅ | **Review Changes.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd> shows what an agent changed as GitHub-style diffs, in a folder tree, across every repo of a VS Code workspace. [More below](#work-alongside-your-agents) |
 | 🌐 | **A browser agents can use.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>B</kbd> opens your dev server beside the terminal, with Chrome's DevTools. [More below](#work-alongside-your-agents) |
 | 🔘 | **Buttons for the tools.** Grid View, Review Changes and the browser sit at the end of the tab bar, lit while open, with a count of changed files on Review |
+| ♻️ | **Picks up where you left off.** After you quit, restart or crash, windows come back as they were: agent tabs resume their Claude Code or Codex session, other terminals show their old output. [More below](#pick-up-where-you-left-off) |
+| 📋 | **Copy agent text whole.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>C</kbd> copies text an agent broke into lines (paragraphs, commands, links) as one piece, and <kbd>⌘</kbd>-click opens links split across lines. [More below](#copy-agent-text-whole) |
 | 🎨 | **Tab colours.** Right-click a tab, or an account, to give it a colour |
 | 📡 | **An open protocol.** Any agent or script can report its state with [OSC 7501](#any-agent-osc-7501) |
 | 🔄 | **Updates itself.** New versions arrive in the app, no reinstalling |
@@ -122,6 +124,37 @@ kinterm-browser open 3000      # open or show a page
 kinterm-browser status         # what's open
 kinterm-browser mcp            # the MCP server, for any agent
 ```
+
+## Pick up where you left off
+
+When KinTerm reopens, after you quit it, restart your Mac or a crash, your windows,
+tabs and splits come back in the same folders, and so does what was in them:
+
+- **Agent tabs resume their session.** KinTerm's Claude Code and Codex hooks note each
+  tab's session once you've sent it something, with the account it runs under (from the
+  `+` menu, or an alias that sets `CLAUDE_CONFIG_DIR` / `CODEX_HOME`). The reopened tab
+  runs `claude --resume <id>` or `codex resume <id>` in the folder the session started in.
+  A session you end yourself (`/exit`, <kbd>⌃</kbd><kbd>D</kbd>) isn't brought back.
+- **Other terminals show their old output.** The last 2,000 lines, in their colours,
+  above a dim *restored after restart* line and a new prompt. KinTerm saves them every
+  20 seconds and when it quits, so a crash loses at most the last few seconds.
+
+Sessions are noted in `~/.config/kinterm/sessions/` and output is kept in
+`~/Library/Application Support/com.kinterm.app/terminal-output/`. To turn it all off, set
+`window-save-state = never`.
+
+## Copy agent text whole
+
+Claude Code and other agents break long lines themselves, with a real line break and an
+indent, so a normal copy brings the breaks along: a command no longer runs, a link no
+longer opens.
+
+- **<kbd>⌘</kbd><kbd>⇧</kbd><kbd>C</kbd>** (or right-click › **Copy Without Line Wraps**)
+  copies the selection with those breaks taken out. Lists, headings, quotes, tables and
+  blank lines stay as they are. <kbd>⌘</kbd><kbd>C</kbd> still copies exactly what's on
+  screen.
+- **<kbd>⌘</kbd>-click a link** that was split across lines and the whole link opens.
+  **Copy URL to Clipboard** in the command palette copies all of it too.
 
 ## Install
 

@@ -51,10 +51,11 @@ struct OnboardingView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.horizontal, 44)
             .padding(.top, 44)
+            .padding(.bottom, 24)
 
             footer
         }
-        .frame(width: 760, height: 560)
+        .frame(width: 760, height: 600)
         .background(OnboardingColors.background)
         .foregroundColor(OnboardingColors.text)
     }
@@ -341,7 +342,7 @@ private struct OnboardingTools: View {
     @ObservedObject var connect: OnboardingConnect
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             OnboardingHeading(
                 title: isNew ? "New in KinTerm" : "Work alongside your agents",
                 detail: "See every agent at once, check what they changed, and watch your app as they build it.")
@@ -368,8 +369,15 @@ private struct OnboardingTools: View {
             connectNote
 
             HStack(spacing: 12) {
-                OnboardingTip(keys: "⌥⌘1–9", text: "A Claude Code or Codex tab for an account, in a new git worktree if you like")
+                OnboardingTip(keys: "⌥⌘1–9", text: "An agent tab for an account, in a worktree if you like")
                 OnboardingTip(keys: "Right-click", text: "A tab's color, or an account's")
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, -4)
+
+            HStack(spacing: 12) {
+                OnboardingTip(keys: "⌘⇧C", text: "Copy agent text without its line breaks")
+                OnboardingTip(keys: "⌘Q", text: "Tabs, output and agent sessions come back")
             }
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -768,6 +776,7 @@ private struct OnboardingNote: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol).font(.system(size: 18)).foregroundColor(OnboardingColors.muted)
             Text(text).font(.system(size: 13)).foregroundColor(OnboardingColors.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
