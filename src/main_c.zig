@@ -134,6 +134,15 @@ pub export fn ghostty_init(argc: usize, argv: [*][*:0]u8) c_int {
     return 0;
 }
 
+/// Re-read the process environment after the host changed it with
+/// setenv/unsetenv. Ghostty keeps a view of `environ` from ghostty_init,
+/// and adding a variable can move that list, leaving the view pointing at
+/// freed memory. Call it on the main thread, right after changing the
+/// environment.
+pub export fn ghostty_sync_environ() void {
+    global.syncEnviron();
+}
+
 /// Runs an action if it is specified. If there is no action this returns
 /// false. If there is an action then this doesn't return.
 pub export fn ghostty_cli_try_action() void {

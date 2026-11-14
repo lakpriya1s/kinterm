@@ -3,7 +3,7 @@
 Everything needed to pick this work up cold. Read this, then
 [README.md](README.md) (scope) and [tasks/README.md](tasks/README.md) (status).
 
-_Last updated: 2026-10-24._
+_Last updated: 2026-11-15._
 
 ## What this is
 
@@ -252,6 +252,8 @@ Claude Code hook ──OSC 7501 (state, account, context, last)─────�
 | Per tab | `Features/Terminal/BaseTerminalController.swift` (most urgent status, `subagentCount`, `createdAt`, `agentTabBar`) |
 | UI (`Features/Agent Tabs/`) | `AgentFaceView.swift` (faces, `Motion`), `AgentTabBar.swift` (settings incl. menu bar style, model incl. `faceMotion` and `inTitlebar`, bar, placement, hover card, `AgentGitBranch`, window drag area), `AgentAccounts.swift` (account store), `AgentNewTabMenu.swift` (`+` menu, launcher, New account…, ⌥⌘1–9), `AgentSummary.swift` (dock badge, menu bar item and its agent cards, View menu items, notification icon), `AgentsPanel.swift` (⌘⇧A, ⌘J, `AgentTime`) |
 | Window | `Features/Terminal/TerminalView.swift` (hosts the bar), `TerminalController.swift` (owns the model, installs shortcuts), `Window Styles/TerminalWindow.swift` (hides the native tab bar and its faces, Title Bar position), `TransparentTitlebarTerminalWindow.swift` (clears its title bar paint for it), `App/AppDelegate.swift` (dock badge count, notification categories, starts the summary) |
+| Reopen after restart | `Features/Terminal/TerminalResume.swift` (agent session records → `claude --resume` / `codex resume`; output saved every 20 s and on quit, played back on restore), `Surface View/SurfaceView_AppKit.swift` (`init(from:)` calls it), `App/AppDelegate.swift` (starts it, saves on quit), `src/apprt/embedded.zig` (`ghostty_surface_read_restore_text`, `ghostty_surface_restore_output`), both hooks (write `~/.config/kinterm/sessions/<KINTERM_SURFACE_ID>`) |
+| Copy agent text whole | `src/terminal/hard_wrap.zig` (joins lines an agent broke at the window's edge), `src/Surface.zig` (`copy_to_clipboard:unwrapped`, `cutLinkAtPin` for links split across lines), `src/renderer/link.zig` (hover underline), `src/config/Config.zig` (⌘⇧C) |
 | Dev | `scripts/dev-run.sh` (strips `CLAUDE*` from the app's environment) |
 
 Key decisions in the code:
@@ -295,6 +297,20 @@ Key decisions in the code:
   right-click menu, and position and menu bar also in **View › Agent Tab
   Bar** and **View › Agents in Menu Bar** (always reachable, even with
   native tabs). Accounts too (`AgentAccounts`). Not Ghostty config keys yet.
+- **Reopening tabs** keys everything by the terminal's id
+  (`KINTERM_SURFACE_ID`), which a restored terminal keeps. Hooks record a
+  session from the first prompt (Claude only saves a conversation then) and
+  delete it on `SessionEnd` only if they can still write to the terminal, so
+  quitting or crashing KinTerm keeps it. Before resuming a Claude session
+  KinTerm checks `<config>/projects/*/<id>.jsonl` exists. Agent tabs don't
+  save output; the agent shows the conversation itself.
+- **Test the debug app from a clean environment** (`scripts/dev-run.sh`, or
+  `env -i HOME=$HOME open -n …`). Launched from inside a Claude Code session,
+  its terminals inherit `CLAUDE_CODE_*` and every `claude` in them runs as a
+  child session that saves no transcript, so nothing can be resumed. The
+  debug domain can also carry `ApplePersistenceIgnoreState = 1` from UI tests,
+  which turns window restoration off: `defaults delete com.kinterm.app.debug
+  ApplePersistenceIgnoreState`.
 - Departures from the design, asked for by the user: account color is a tab
   tint, not a ring (ring kept as an option); the `+` menu has a folder row;
   the Title Bar, Bottom and Right positions; the window title shown for Top/Left; the menu bar
