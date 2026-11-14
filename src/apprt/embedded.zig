@@ -1980,6 +1980,76 @@ pub const CAPI = struct {
         ptr.deinit();
     }
 
+    /// Read the primary screen's recent content with its colors, as VT
+    /// sequences, so the app can save it and play it back with
+    /// `ghostty_surface_restore_output` when it reopens the terminal after
+    /// a restart. It ends with the row above the cursor (in a shell, the
+    /// cursor's row is the prompt, which the new shell prints again) and
+    /// keeps at most `max_rows` rows. Returns false if there's nothing to
+    /// save. Free the result with `ghostty_surface_free_text`.
+    export fn ghostty_surface_read_restore_text(
+        surface: *Surface,
+        max_rows: u32,
+        result: *Text,
+    ) bool {
+        if (max_rows == 0) return false;
+        const core_surface = &surface.core_surface;
+        core_surface.renderer_state.mutex.lockUncancelable(global.io());
+        defer core_surface.renderer_state.mutex.unlock(global.io());
+
+        const t = &core_surface.io.terminal;
+        const screen = t.screens.get(.primary) orelse return false;
+        const pages = &screen.pages;
+
+        var end = screen.cursor.page_pin.up(1) orelse return false;
+        end.x = end.node.cols() - 1;
+        const end_y = (pages.pointFromPin(.screen, end) orelse return false).coord().y;
+        const start = pages.pin(.{ .screen = .{
+            .y = end_y -| (max_rows - 1),
+        } }) orelse return false;
+
+        var formatter: terminal.formatter.ScreenFormatter = .init(screen, .{
+            .emit = .vt,
+            .unwrap = true,
+            .trim = true,
+            // No theme colors: they'd be emitted as sequences that set
+            // the terminal's own colors, and palette colors as fixed RGB.
+        });
+        formatter.content = .{ .selection = terminal.Selection.init(start, end, false) };
+
+        var out: std.Io.Writer.Allocating = .init(global.alloc());
+        defer out.deinit();
+        formatter.format(&out.writer) catch return false;
+        const text = out.toOwnedSliceSentinel(0) catch return false;
+        if (std.mem.trim(u8, text, " \r\n").len == 0) {
+            global.alloc().free(text);
+            return false;
+        }
+
+        result.* = .{
+            .tl_px_x = -1,
+            .tl_px_y = -1,
+            .offset_start = 0,
+            .offset_len = 0,
+            .text = text.ptr,
+            .text_len = text.len,
+        };
+        return true;
+    }
+
+    /// Process bytes as if the surface's program had written them, such
+    /// as text saved with `ghostty_surface_read_restore_text`. Call it
+    /// right after creating the surface so it comes before the program's
+    /// own output.
+    export fn ghostty_surface_restore_output(
+        surface: *Surface,
+        ptr: [*]const u8,
+        len: usize,
+    ) void {
+        if (len == 0) return;
+        surface.core_surface.io.processOutput(ptr[0..len]);
+    }
+
     /// Tell the surface that it needs to schedule a render
     export fn ghostty_surface_refresh(surface: *Surface) void {
         surface.refresh();

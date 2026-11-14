@@ -87,6 +87,32 @@ count_shells() {
 
 event=$(field hook_event_name)
 cwd=$(field cwd)
+
+# KinTerm reopens its tabs after a restart or a crash. So it can resume
+# this session in the same tab, record the session in a file named after
+# the tab (KINTERM_SURFACE_ID, which a reopened tab keeps). The folder is
+# the one the session started in, where the agent looks for it. A session
+# is only saved once you send it something, so it's recorded from the
+# first prompt on, not at SessionStart.
+session_file=""
+case "${KINTERM_SURFACE_ID:-}" in
+  "" | *[!A-Fa-f0-9-]*) ;;
+  *) session_file="${XDG_CONFIG_HOME:-$HOME/.config}/kinterm/sessions/$KINTERM_SURFACE_ID" ;;
+esac
+if [ -n "$session_file" ] && [ "$event" != SessionStart ] && [ "$event" != SessionEnd ]; then
+  session=$(field session_id)
+  case "$session" in
+    "" | *[!A-Za-z0-9_-]*) ;;
+    *)
+      if ! grep -qx "session=$session" "$session_file" 2>/dev/null &&
+        mkdir -p "${session_file%/*}" 2>/dev/null; then
+        printf 'agent=claude\nsession=%s\nconfig=%s\ncwd=%s\n' \
+          "$session" "${CLAUDE_CONFIG_DIR:-}" "${cwd:-$PWD}" >"$session_file.tmp" 2>/dev/null &&
+          mv -f "$session_file.tmp" "$session_file" 2>/dev/null
+      fi
+      ;;
+  esac
+fi
 kind=""
 msg=""
 last=""
@@ -206,5 +232,10 @@ tty=$(status_tty)
 [ -n "$tty" ] || exit 0
 
 # Never fail the hook because of this.
-printf '\033]7501;%s\033\\' "$report" 2>/dev/null >"$tty" || true
+if printf '\033]7501;%s\033\\' "$report" 2>/dev/null >"$tty"; then
+  # The session ended with its terminal still open, so you ended it:
+  # don't resume it. When KinTerm quits or crashes, the terminal is gone
+  # first and the record stays.
+  [ "$event" = SessionEnd ] && [ -n "$session_file" ] && rm -f "$session_file"
+fi
 exit 0

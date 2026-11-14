@@ -44,3 +44,10 @@ home's folder name (`CODEX_HOME`, or `.codex`). KinTerm colors the ring
 around the face by account. It does nothing outside KinTerm (`TERM_PROGRAM`
 must be `ghostty`) and never prints, since Codex adds a hook's output to the
 conversation for some events.
+
+## Resuming after a restart
+
+Like the Claude Code hook, it records the session for KinTerm's tab in
+`~/.config/kinterm/sessions/<KINTERM_SURFACE_ID>`, so a tab KinTerm reopens
+after a restart or a crash runs `codex resume <id>`. A session you end
+yourself is forgotten.

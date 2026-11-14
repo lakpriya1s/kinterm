@@ -60,3 +60,12 @@ Any program can send these, so other agents can be supported by writing a
 similar hook. It does nothing outside KinTerm (`TERM_PROGRAM` must be
 `ghostty`, which KinTerm keeps setting for compatibility). Requires `jq` for installing; the hook itself uses `jq` when
 present to read tool details.
+
+## Resuming after a restart
+
+The hook also records the session for KinTerm's tab, in
+`~/.config/kinterm/sessions/<KINTERM_SURFACE_ID>`: the agent, session id,
+`CLAUDE_CONFIG_DIR` and the folder the session started in. When KinTerm
+reopens its windows after you quit it or it crashes, the tab keeps its id and
+runs `claude --resume <id>` there. When the session ends while its terminal is
+still open (you ended it), the record is deleted, so it isn't resumed.
