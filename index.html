@@ -338,6 +338,14 @@ section[id]{scroll-margin-top:64px}
 .connect .row{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:12px;background:var(--card);border:1px solid var(--edge);font-size:14px}
 .connect .row::before{content:"\2713";color:var(--done);font-weight:700}
 .connect .row code{margin-left:auto;color:var(--muted);font-size:12px}
+/* Restore after restart, and copying agent text whole */
+.mterm{width:100%;border-radius:12px;background:var(--bg);border:1px solid var(--edge);padding:12px 14px;font:400 12px/1.7 var(--mono);color:#d6d9df;overflow:hidden}
+.mterm div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mterm .old{opacity:.55}
+.mterm .r{color:#e06c75}.mterm .g{color:var(--done)}.mterm .p{color:var(--teal)}
+.mterm .sep{color:var(--dim);text-align:center}
+.mterm .hl{background:rgba(92,160,255,.22);border-radius:3px}
+.mterm .arrow{color:var(--dim);text-align:center;margin:4px 0}
 .connect .go{align-self:flex-end;margin-top:4px;padding:8px 16px;border-radius:9px;background:var(--blue);color:#fff;font-weight:600;font-size:14px}
 .notes{position:relative;width:100%;max-width:340px;height:356px}
 .notes .mn{position:absolute;inset:0 0 auto;transition:transform .6s cubic-bezier(.2,1,.3,1),opacity .6s}
@@ -853,6 +861,31 @@ section[id]{scroll-margin-top:64px}
               <div class="row">Browser tools for Claude Code <code>kinterm-browser mcp</code></div>
               <div class="row">Browser tools for Codex <code>kinterm-browser mcp</code></div>
               <span class="go">Connect Agents</span>
+            </div>
+          </div>
+        </article>
+        <article class="tile w4 reveal">
+          <h3>Pick up where you left off</h3>
+          <p>Quit KinTerm, restart your Mac, or crash: your windows come back as they were. Each agent tab resumes its Claude Code or Codex session with the same account, and every other terminal shows its old output above a new prompt.</p>
+          <div class="demo">
+            <div class="mterm" aria-label="A terminal and an agent tab after KinTerm reopens">
+              <div class="old"><span class="p">~/app %</span> npm test</div>
+              <div class="old"><span class="g">&#10003; 42 passed</span>, <span class="r">1 failed</span></div>
+              <div class="sep">&#9472;&#9472; restored after restart &#9472;&#9472;</div>
+              <div><span class="p">~/app %</span> claude --resume 7f35f9cd&hellip;</div>
+              <div class="g">&#10095; Picking up where we left off: fixing the failing test.</div>
+            </div>
+          </div>
+        </article>
+        <article class="tile reveal">
+          <h3>Copy it whole</h3>
+          <p>Agents break their own lines to fit the window. <span class="kbd">&#8984;&#8679;C</span> copies a paragraph, command or link as one line, and &#8984;-click opens a link that was split across lines.</p>
+          <div class="demo">
+            <div class="mterm" aria-label="A link split across two lines, copied as one">
+              <div><span class="hl">https://github.com/acme/</span></div>
+              <div><span class="hl">&nbsp;&nbsp;app/pull/128</span></div>
+              <div class="arrow">&#8595; &#8984;&#8679;C</div>
+              <div>https://github.com/acme/app/pull/128</div>
             </div>
           </div>
         </article>
