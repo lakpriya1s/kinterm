@@ -2282,6 +2282,10 @@ keybind: Keybinds = .{},
 ///
 ///   * `always` will always save window state whenever Ghostty is exited.
 ///
+/// KinTerm also brings back what ran in each terminal: an agent tab
+/// resumes its Claude Code or Codex session, and other terminals show
+/// their old output (the last 2,000 rows, with colors) above a new prompt.
+///
 /// If you change this value to `never` while Ghostty is not running, the next
 /// Ghostty launch will NOT restore the window state.
 ///
@@ -2294,10 +2298,11 @@ keybind: Keybinds = .{},
 /// running, the previous window state will not be restored because Ghostty only
 /// saves state on exit if this is enabled.
 ///
-/// The default value is `default`.
+/// The default value is `always`, so KinTerm reopens your terminals after
+/// you quit it, not only after a crash.
 ///
 /// This is currently only supported on macOS. This has no effect on Linux.
-@"window-save-state": WindowSaveState = .default,
+@"window-save-state": WindowSaveState = .always,
 
 /// Resize the window in discrete increments of the focused surface's cell size.
 /// If this is disabled, surfaces are resized in pixel increments. Currently

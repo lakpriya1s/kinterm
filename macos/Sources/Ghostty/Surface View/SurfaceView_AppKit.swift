@@ -2084,7 +2084,15 @@ extension Ghostty {
             let savedTitle = try container.decodeIfPresent(String.self, forKey: .title)
             let isUserSetTitle = try container.decodeIfPresent(Bool.self, forKey: .isUserSetTitle) ?? false
 
+            // An agent tab resumes its session. Any other terminal shows
+            // its old output again (see TerminalResume).
+            let resumesAgent = uuid.map { TerminalResume.resumeAgent(for: $0, in: &config) } ?? false
+
             self.init(app, baseConfig: config, uuid: uuid)
+
+            if !resumesAgent, let uuid, let surface = self.surface {
+                TerminalResume.restoreOutput(for: uuid, into: surface)
+            }
 
             // Restore the saved title after initialization
             if let title = savedTitle {

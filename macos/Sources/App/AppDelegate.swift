@@ -235,6 +235,10 @@ class AppDelegate: NSObject,
         // Initial config loading
         ghosttyConfigDidChange(config: ghostty.config)
 
+        // Keep terminals' output saved, for reopening them after a restart
+        // or a crash.
+        TerminalResume.start()
+
         // Start our update checker. Builds without a feed have no updates.
         updateController.startUpdater()
         menuCheckForUpdates?.isHidden = !UpdateController.isEnabled
@@ -446,6 +450,9 @@ class AppDelegate: NSObject,
         // so remove them all now. In the future we may want to be
         // more selective and only remove surface-targeted notifications.
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+
+        // Save every terminal's output for when its window is restored.
+        TerminalResume.saveAll()
     }
 
     /// This is called when the application is already open and someone double-clicks the icon
