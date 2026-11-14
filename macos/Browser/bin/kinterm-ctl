@@ -1,0 +1,356 @@
+#!/bin/sh
+# kinterm-ctl: control KinTerm from the terminal you're in, by hand or from an agent.
+#
+#   Your terminal
+#     kinterm-ctl run [--name N] [--right|--down|--left|--up] [--cwd DIR] -- CMD...
+#                                 run CMD in a new pane beside this one (a dev server, tests)
+#     kinterm-ctl logs NAME [--lines N]   what a pane started with `run` shows
+#     kinterm-ctl status STATE [MSG]      show STATE on this tab: idle working done blocked error clear
+#     kinterm-ctl notify [--title T] MSG  a notification that leads back to this terminal
+#     kinterm-ctl review [FILE...]        open the review (⌘⇧R) at FILE's changes
+#     kinterm-ctl scrollback [--lines N]  this terminal's own text
+#
+#   Agents in other tabs (only the ones this terminal started)
+#     kinterm-ctl agent spawn [--name N] [--cwd DIR] [--worktree] [--allow-spawn] -- CMD...
+#                                 start CMD (e.g. claude "add tests") in a new tab
+#     kinterm-ctl agent list [--json]     the agents and panes started here, and what each is doing
+#     kinterm-ctl agent wait NAME... [--until done|idle|any] [--timeout SECS]
+#                                 wait until they finish their turn or need someone
+#     kinterm-ctl agent read NAME [--lines N]
+#     kinterm-ctl agent send NAME [--no-enter] TEXT...
+#     kinterm-ctl agent kill NAME         close its tab
+#     kinterm-ctl agent release NAME      hand it to the user; this terminal can't control it after
+#
+#   kinterm-ctl browser ...             KinTerm's browser (same as kinterm-browser)
+#   kinterm-ctl mcp                     MCP server with these commands as tools, for agents
+#
+# KinTerm's terminals have this on their PATH. It talks to KinTerm over a
+# socket only you can use, and KinTerm checks that each request comes from
+# the terminal it says: a terminal controls itself and what it started.
+
+# The JavaScript passed to js() is literal on purpose.
+# shellcheck disable=SC2016
+
+set -eu
+
+here=$(cd "$(dirname "$0")" && pwd)
+me=kinterm-ctl
+
+if [ -n "${KINTERM_SOCKET:-}" ]; then
+  KINTERM_BROWSER_SOCKET=$KINTERM_SOCKET
+fi
+if [ -z "${KINTERM_BROWSER_SOCKET:-}" ]; then
+  id=com.kinterm.app
+  if [ -f "$here/../Info.plist" ]; then
+    id=$(plutil -extract CFBundleIdentifier raw "$here/../Info.plist" 2>/dev/null || echo com.kinterm.app)
+  fi
+  KINTERM_BROWSER_SOCKET="$HOME/Library/Application Support/$id/browser.sock"
+fi
+export KINTERM_BROWSER_SOCKET
+
+die() {
+  echo "$me: $*" >&2
+  exit 1
+}
+
+usage() {
+  sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+# JSON in and out with JavaScript for Automation: on every Mac, and it
+# gets quoting right where sed can't.
+#   js 'BODY' ARGS...   runs BODY with argv = ARGS and prints what it returns
+js() {
+  body=$1
+  shift
+  osascript -l JavaScript -e "function run(argv) { $body }" -- "$@" 2>/dev/null
+}
+
+# Send a request (a JSON object, as text) and print the reply.
+request() {
+  [ -S "$KINTERM_BROWSER_SOCKET" ] || die "KinTerm isn't running (no socket at $KINTERM_BROWSER_SOCKET)."
+  case "${KINTERM_SURFACE_ID:-}" in
+    "" | *[!0-9A-Fa-f-]*) die "run this in a KinTerm terminal (KINTERM_SURFACE_ID isn't set)." ;;
+  esac
+  body=$(js 'const r = JSON.parse(argv[0]); r.surface = argv[1]; return JSON.stringify(r)' "$1" "$KINTERM_SURFACE_ID")
+  reply=$(printf '%s\n' "$body" | nc -U "$KINTERM_BROWSER_SOCKET") || true
+  [ -n "$reply" ] || die "no reply from KinTerm."
+  printf '%s' "$reply"
+}
+
+# Send a request; fail with its error, or print FIELD of the reply if asked.
+call() {
+  reply=$(request "$1")
+  out=$(js '
+    const r = JSON.parse(argv[0]);
+    if (!r.ok) return "!" + (r.error || "KinTerm refused.");
+    const v = argv[1] ? r[argv[1]] : undefined;
+    return v === undefined ? "" : (typeof v === "string" ? v : JSON.stringify(v));
+  ' "$reply" "${2:-}")
+  case "$out" in
+    !*) die "${out#!}" ;;
+  esac
+  [ -n "$out" ] && printf '%s\n' "$out"
+  return 0
+}
+
+# Build a request: obj KEY VALUE ... (VALUE is text; prefix with = for JSON:
+# =true, =5, =["a"])
+obj() {
+  js '
+    const o = {};
+    for (let i = 0; i + 1 < argv.length; i += 2) {
+      const v = argv[i + 1];
+      o[argv[i]] = v.startsWith("=") ? JSON.parse(v.slice(1)) : v;
+    }
+    return JSON.stringify(o);
+  ' "$@"
+}
+
+# The words after --, as one command line for a shell. One word is a
+# command line already (-- 'npm run dev | tee log'); several are quoted
+# so each stays one word (-- claude "add tests").
+join_command() {
+  if [ "$#" -eq 1 ]; then
+    printf '%s' "$1"
+    return
+  fi
+  out=""
+  for word in "$@"; do
+    case "$word" in
+      *[!A-Za-z0-9_./:=@%+,-]* | "") word="'$(printf '%s' "$word" | sed "s/'/'\\\\''/g")'" ;;
+    esac
+    out="${out:+$out }$word"
+  done
+  printf '%s' "$out"
+}
+
+lines_arg() {
+  case "$1" in
+    "" | *[!0-9]*) die "--lines takes a number." ;;
+  esac
+}
+
+# A fresh git worktree for an agent, on branch kinterm/NAME, so agents
+# working side by side don't edit the same files.
+make_worktree() {
+  name=$1
+  from=${2:-$PWD}
+  top=$(git -C "$from" rev-parse --show-toplevel 2>/dev/null) || die "--worktree needs a git repository ($from isn't in one)."
+  dir="${KINTERM_WORKTREES:-$HOME/.kinterm/worktrees}/$(basename "$top")/$name"
+  if [ -d "$dir" ]; then
+    printf '%s' "$dir"
+    return
+  fi
+  mkdir -p "$(dirname "$dir")"
+  if git -C "$top" show-ref --verify --quiet "refs/heads/kinterm/$name"; then
+    git -C "$top" worktree add --quiet "$dir" "kinterm/$name" >&2 || die "couldn't add a worktree at $dir."
+  else
+    git -C "$top" worktree add --quiet -b "kinterm/$name" "$dir" >&2 || die "couldn't add a worktree at $dir."
+  fi
+  printf '%s' "$dir"
+}
+
+spawn() {
+  kind=$1
+  shift
+  name="" cwd="" direction=right worktree=false allow=false
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --name) name=${2:-}; shift 2 ;;
+      --name=*) name=${1#--name=}; shift ;;
+      --cwd) cwd=${2:-}; shift 2 ;;
+      --cwd=*) cwd=${1#--cwd=}; shift ;;
+      --right | --down | --left | --up) direction=${1#--}; shift ;;
+      --worktree) worktree=true; shift ;;
+      --allow-spawn) allow=true; shift ;;
+      --) shift; break ;;
+      -*) die "unknown option $1" ;;
+      *) break ;;
+    esac
+  done
+  [ -n "$cwd" ] && cwd=$(cd "$cwd" 2>/dev/null && pwd) || true
+  if [ "$worktree" = true ]; then
+    [ -n "$name" ] || name="agent-$(date +%H%M%S)"
+    cwd=$(make_worktree "$name" "${cwd:-$PWD}")
+  fi
+  [ -n "$cwd" ] || cwd=$PWD
+  command=$(join_command "$@")
+  worker=$(call "$(obj cmd spawn kind "$kind" name "$name" cwd "$cwd" command "$command" \
+    direction "$direction" allowSpawn "=$allow")" worker)
+  # Its name, for the commands that follow.
+  js 'return JSON.parse(argv[0]).name' "$worker"
+}
+
+list() {
+  json=false
+  [ "${1:-}" = --json ] && json=true
+  workers=$(call '{"cmd":"workers"}' workers)
+  if [ "$json" = true ]; then
+    printf '%s\n' "$workers"
+    return
+  fi
+  js '
+    const all = JSON.parse(argv[0]);
+    if (!all.length) return "Nothing started from this terminal.";
+    return all.map(w => {
+      const what = w.msg ? "  " + w.msg : "";
+      const code = w.exitCode !== undefined ? " (exit " + w.exitCode + ")" : "";
+      return `${w.name}\t${w.kind}\t${w.state}${code}${w.needs ? " (" + w.needs + ")" : ""}${what}`;
+    }).join("\n");
+  ' "${workers:-[]}"
+}
+
+wait_for() {
+  until="done" timeout=0 names=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --until) until=${2:-}; shift 2 ;;
+      --until=*) until=${1#--until=}; shift ;;
+      --timeout) timeout=${2:-}; shift 2 ;;
+      --timeout=*) timeout=${1#--timeout=}; shift ;;
+      -*) die "unknown option $1" ;;
+      *) names="$names $1"; shift ;;
+    esac
+  done
+  case "$until" in done | idle | any) ;; *) die "--until is done, idle or any." ;; esac
+  case "$timeout" in "" | *[!0-9]*) die "--timeout takes seconds." ;; esac
+  start=$(date +%s)
+  first=""
+  while :; do
+    workers=$(call '{"cmd":"workers"}' workers)
+    # done: every named worker settled (finished its turn, needs someone,
+    # failed, or exited). idle: none is working. any: one of them settled.
+    verdict=$(js '
+      const all = JSON.parse(argv[0]);
+      const names = argv[1].trim() ? argv[1].trim().split(/\s+/) : all.map(w => w.name);
+      const until = argv[2];
+      const picked = [];
+      for (const n of names) {
+        const w = all.find(w => w.name === n);
+        if (!w) return "!No worker named " + n + " started from this terminal.";
+        picked.push(w);
+      }
+      if (!picked.length) return "!Nothing started from this terminal to wait for.";
+      const ready = w => until === "idle" ? w.state !== "working" : w.settled;
+      const ok = until === "any" ? picked.some(ready) : picked.every(ready);
+      if (!ok) return "";
+      return picked.map(w => {
+        const said = w.last ? "\n  " + w.last.replace(/\n/g, "\n  ") : "";
+        const code = w.exitCode !== undefined ? " (exit " + w.exitCode + ")" : "";
+        return `${w.name}: ${w.state}${code}${w.needs ? " (" + w.needs + ")" : ""}${w.msg ? " - " + w.msg : ""}${said}`;
+      }).join("\n");
+    ' "${workers:-[]}" "$names" "$until")
+    case "$verdict" in
+      !*) die "${verdict#!}" ;;
+      "") ;;
+      *)
+        printf '%s\n' "$verdict"
+        return 0
+        ;;
+    esac
+    if [ "$timeout" -gt 0 ] && [ $(($(date +%s) - start)) -ge "$timeout" ]; then
+      echo "$me: still working after ${timeout}s." >&2
+      exit 2
+    fi
+    [ -n "$first" ] || first=1
+    sleep 2
+  done
+}
+
+command=${1:-help}
+[ "$#" -gt 0 ] && shift
+
+case "$command" in
+  run)
+    spawn pane "$@"
+    ;;
+  logs)
+    name=${1:-}
+    [ -n "$name" ] || die "logs NAME"
+    shift
+    lines=200
+    [ "${1:-}" = --lines ] && { lines=${2:-}; lines_arg "$lines"; }
+    call "$(obj cmd read name "$name" lines "=$lines")" text
+    ;;
+  status)
+    state=${1:-}
+    [ -n "$state" ] || die "status STATE [MESSAGE]"
+    shift
+    call "$(obj cmd set-status state "$state" msg "$*")"
+    ;;
+  notify)
+    title=KinTerm
+    if [ "${1:-}" = --title ]; then
+      title=${2:-}
+      shift 2
+    fi
+    [ "$#" -gt 0 ] || die "notify [--title T] MESSAGE"
+    call "$(obj cmd notify title "$title" body "$*")"
+    ;;
+  review)
+    files="[]"
+    if [ "$#" -gt 0 ]; then
+      files=$(js '
+        return JSON.stringify(argv.slice(1).map(f => f.startsWith("/") ? f : argv[0] + "/" + f.replace(/^\.\//, "")));
+      ' "$PWD" "$@")
+    fi
+    call "$(obj cmd review files "=$files")"
+    ;;
+  scrollback)
+    lines=200
+    [ "${1:-}" = --lines ] && { lines=${2:-}; lines_arg "$lines"; }
+    call "$(obj cmd scrollback lines "=$lines")" text
+    ;;
+  agent | agents)
+    sub=${1:-list}
+    [ "$#" -gt 0 ] && shift
+    case "$sub" in
+      spawn | start | new) spawn tab "$@" ;;
+      list | ls) list "$@" ;;
+      wait) wait_for "$@" ;;
+      read)
+        name=${1:-}
+        [ -n "$name" ] || die "agent read NAME [--lines N]"
+        shift
+        lines=200
+        [ "${1:-}" = --lines ] && { lines=${2:-}; lines_arg "$lines"; }
+        call "$(obj cmd read name "$name" lines "=$lines")" text
+        ;;
+      send)
+        name=${1:-}
+        [ -n "$name" ] || die "agent send NAME [--no-enter] TEXT..."
+        shift
+        enter=true
+        [ "${1:-}" = --no-enter ] && { enter=false; shift; }
+        call "$(obj cmd send name "$name" text "$*" enter "=$enter")"
+        ;;
+      kill | stop | close)
+        [ -n "${1:-}" ] || die "agent kill NAME"
+        call "$(obj cmd kill name "$1")"
+        ;;
+      release)
+        [ -n "${1:-}" ] || die "agent release NAME"
+        call "$(obj cmd release name "$1")"
+        ;;
+      *) die "unknown agent command '$sub' (spawn, list, wait, read, send, kill, release)" ;;
+    esac
+    ;;
+  browser)
+    exec "$here/kinterm-browser" "$@"
+    ;;
+  mcp)
+    for mcp in "$here/kinterm-ctl-mcp.mjs" "$here/../Resources/browser/kinterm-ctl-mcp.mjs"; do
+      [ -f "$mcp" ] && exec node "$mcp" "$@"
+    done
+    die "the MCP server script is missing next to $0"
+    ;;
+  help | -h | --help)
+    usage
+    ;;
+  *)
+    echo "$me: unknown command '$command'" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

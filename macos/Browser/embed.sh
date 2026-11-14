@@ -17,11 +17,14 @@ sign() {
   codesign --force --sign "$identity" --timestamp=none "$@"
 }
 
-# The CLI and the MCP server script, always.
-cp "$here/bin/kinterm-browser" "$app/Contents/MacOS/kinterm-browser"
+# The CLIs and their MCP server scripts, always: `kinterm-ctl` (KinTerm
+# itself) and `kinterm-browser`.
 mkdir -p "$app/Contents/Resources/browser"
-cp "$here/bin/kinterm-browser-mcp.mjs" "$app/Contents/Resources/browser/"
-sign "$app/Contents/MacOS/kinterm-browser"
+for cli in kinterm-ctl kinterm-browser; do
+  cp "$here/bin/$cli" "$app/Contents/MacOS/$cli"
+  cp "$here/bin/$cli-mcp.mjs" "$app/Contents/Resources/browser/"
+  sign "$app/Contents/MacOS/$cli"
+done
 
 # The KinTerm skill for agents, installed by the Setup Assistant.
 mkdir -p "$app/Contents/Resources/agents/skills/kinterm"

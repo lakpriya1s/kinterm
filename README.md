@@ -125,6 +125,32 @@ kinterm-browser status         # what's open
 kinterm-browser mcp            # the MCP server, for any agent
 ```
 
+**Agents can drive KinTerm itself**, with `kinterm-ctl` or the `kinterm` MCP server that
+Connect Agents adds. An agent can run a dev server or tests in a pane beside it and read
+the output, notify you when it's done, and open the review at the files to look at first.
+It can also split a big job across other agents, each in a tab of its own (optionally in
+its own git worktree), wait for them, read what they did, answer their questions, and
+close them. You can watch and type into every one of those tabs.
+
+```sh
+kinterm-ctl run --name web -- 'npm run dev'      # a pane beside this terminal
+kinterm-ctl logs web                             # what it printed
+kinterm-ctl notify "Done: 3 files to review"     # a notification that leads back here
+kinterm-ctl review src/auth.ts                   # open the review at that file
+
+kinterm-ctl agent spawn --name api --worktree -- claude "Add rate limiting to the API"
+kinterm-ctl agent wait api                       # until it finishes or needs someone
+kinterm-ctl agent read api                       # what it did, or what it's asking
+kinterm-ctl agent send api "Use redis for the counters"
+kinterm-ctl agent kill api
+```
+
+A terminal only controls itself and the tabs and panes it started, never your other
+tabs. KinTerm checks this from the processes, not from anything a program claims: a
+request counts only if the process that sent it runs in that terminal. A worker can't
+start workers of its own unless it was allowed to. Workers are ordinary tabs again after
+KinTerm restarts.
+
 ## Pick up where you left off
 
 When KinTerm reopens, after you quit it, restart your Mac or a crash, your windows,

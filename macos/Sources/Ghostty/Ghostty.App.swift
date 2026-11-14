@@ -1662,11 +1662,14 @@ extension Ghostty {
                 // The shell is back at its prompt, so whatever reported a
                 // program status has exited, even if it never said so (it
                 // crashed, was interrupted, or skipped its last report).
+                let exitCode = v.exit_code
                 DispatchQueue.main.async {
                     surfaceView.updateProgramStatus(.init(
                         state: .clear, kind: nil, progress: nil,
                         app: nil, title: nil, msg: nil, account: nil,
                         context: nil, shells: nil, last: nil, id: nil))
+                    // A worker another terminal waits on may be done.
+                    AgentWorkers.shared.commandFinished(in: surfaceView, exitCode: Int(exitCode))
                 }
 
                 // Determine if we even care about command finish notifications

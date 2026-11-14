@@ -160,6 +160,27 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
         model.refresh()
     }
 
+    /// Show the tab's review wherever it shows (never closing it, unlike
+    /// ⌘⇧R), and open the first of `files` that has changes, or else the
+    /// file itself. For `kinterm-ctl review`, when an agent hands work over.
+    @MainActor
+    func show(for controller: BaseTerminalController, files: [String] = []) {
+        let id = ObjectIdentifier(controller)
+        if inGrid(controller), let window = controller.gridWindow ?? controller.window {
+            openGridReview(of: controller, in: window)
+        } else if let window = windows[id], window.isVisible {
+            window.orderFront(nil)
+        } else if !panels.contains(id) {
+            if preferred == .window { showWindow(for: controller) } else { showPanel(for: controller) }
+        }
+
+        let model = model(for: controller)
+        model.tab = .changes
+        model.refresh()
+        guard !files.isEmpty else { return }
+        model.reveal(files: files)
+    }
+
     // MARK: In a grid
 
     private static func gridKey(_ window: NSWindow) -> ObjectIdentifier {

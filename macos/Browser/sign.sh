@@ -2,7 +2,7 @@
 # Sign the browser inside a built KinTerm.app for release, before the app
 # itself is signed: Chromium's libraries, its framework, the browser
 # module and the helper apps (hardened runtime; the helpers get JIT for V8,
-# see src/helper.entitlements), then the kinterm-browser CLI. Used by
+# see src/helper.entitlements), then the kinterm-browser and kinterm-ctl CLIs. Used by
 # .github/workflows/kinterm-release.yml and scripts/release-mac.sh.
 #
 # Usage: macos/Browser/sign.sh <KinTerm.app> <signing identity>
@@ -32,6 +32,8 @@ if [ -d "$fw" ]; then
   done
 fi
 
-if [ -f "$app/Contents/MacOS/kinterm-browser" ]; then
-  sign "$app/Contents/MacOS/kinterm-browser"
-fi
+for cli in kinterm-browser kinterm-ctl; do
+  if [ -f "$app/Contents/MacOS/$cli" ]; then
+    sign "$app/Contents/MacOS/$cli"
+  fi
+done
