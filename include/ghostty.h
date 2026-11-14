@@ -1182,6 +1182,7 @@ typedef enum {
 // Published API
 
 GHOSTTY_API int ghostty_init(uintptr_t, char**);
+GHOSTTY_API void ghostty_sync_environ(void);
 GHOSTTY_API void ghostty_cli_try_action(void);
 GHOSTTY_API ghostty_info_s ghostty_info(void);
 GHOSTTY_API const char* ghostty_translate(const char*);

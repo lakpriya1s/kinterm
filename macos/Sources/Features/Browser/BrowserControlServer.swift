@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import GhosttyKit
 
 /// A Unix socket `kinterm-browser` (the CLI, and the MCP server agents use)
 /// talks to: one JSON request per connection, one JSON reply. The socket is
@@ -41,6 +42,9 @@ final class BrowserControlServer {
         // so an agent always reaches the KinTerm it runs in, even when its
         // MCP config names another (a release build's, from setup).
         setenv("KINTERM_SOCKET", path, 1)
+        // Adding variables can move the environment's list; libghostty keeps
+        // a view of it, which would then point at freed memory.
+        ghostty_sync_environ()
 
         try? FileManager.default.createDirectory(
             atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
