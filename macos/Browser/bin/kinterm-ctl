@@ -295,7 +295,7 @@ case "$command" in
         return JSON.stringify(argv.slice(1).map(f => f.startsWith("/") ? f : argv[0] + "/" + f.replace(/^\.\//, "")));
       ' "$PWD" "$@")
     fi
-    call "$(obj cmd review files "=$files")"
+    call "$(obj cmd review files "=$files" directory "$PWD")"
     ;;
   scrollback)
     lines=200

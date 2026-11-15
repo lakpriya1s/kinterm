@@ -393,9 +393,23 @@ final class ReviewModel: ObservableObject {
 
     // MARK: Loading
 
-    /// The repository of the tab's focused terminal.
+    /// The repository of the tab's focused terminal, or the folder an agent
+    /// asked for while the terminal stays where it was.
     private var pwd: String? {
-        controller?.focusedSurface?.pwd ?? controller?.surfaceTree.first?.pwd
+        let terminal = controller?.focusedSurface?.pwd ?? controller?.surfaceTree.first?.pwd
+        if let directory, directory.terminal == terminal { return directory.path }
+        return terminal
+    }
+
+    /// The folder `kinterm-ctl review` ran in, and the terminal's folder at
+    /// the time. An agent often works in a folder its shell never `cd`ed
+    /// to; this lasts until the terminal's own folder changes.
+    private var directory: (path: String, terminal: String?)?
+
+    /// Review the repository at `path` rather than the terminal's folder.
+    func review(in path: String) {
+        let terminal = controller?.focusedSurface?.pwd ?? controller?.surfaceTree.first?.pwd
+        directory = path == terminal ? nil : (path, terminal)
     }
 
     func refresh() {

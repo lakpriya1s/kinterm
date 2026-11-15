@@ -108,7 +108,8 @@ enum KinTermControl {
 
         case "review":
             let files = request["files"] as? [String] ?? []
-            ReviewCenter.shared.show(for: controller, files: files)
+            let directory = (request["directory"] as? String).flatMap { $0.hasPrefix("/") ? $0 : nil }
+            ReviewCenter.shared.show(for: controller, files: files, directory: directory)
 
         default:
             return fail("Unknown command \(command).")

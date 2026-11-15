@@ -196,7 +196,7 @@ const tools = [
     },
     async call(a) {
       const files = (a.files ?? []).map((f) => path.resolve(process.cwd(), f));
-      await ask({ cmd: "review", files });
+      await ask({ cmd: "review", files, directory: process.cwd() });
       return "The review is open.";
     },
   },
