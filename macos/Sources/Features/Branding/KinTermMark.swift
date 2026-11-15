@@ -102,14 +102,17 @@ struct KinTermMark: View {
                 drawExpression(expression, in: &layer, origin: origin, scale: 3 * unit, ink: ink)
                 return
             }
+            // Laid out like the sleeping face (the idle state's, at three
+            // times its size): eyes on one line, a small mouth below. The
+            // left eye is the prompt, centered where that face's eye is.
             var chevron = Path()
-            chevron.move(to: point(29, 37))
-            chevron.addLine(to: point(43, 47.5))
-            chevron.addLine(to: point(29, 58))
+            chevron.move(to: point(33.5, 47.25))
+            chevron.addLine(to: point(47.5, 57.75))
+            chevron.addLine(to: point(33.5, 68.25))
             layer.stroke(chevron, with: .color(KinTermBrand.blue),
                          style: StrokeStyle(lineWidth: 7.5 * unit, lineCap: .round, lineJoin: .round))
-            layer.fill(Path(roundedRect: rect(73, 44, 22, 7.5), cornerRadius: 3.75 * unit), with: ink)
-            layer.fill(Path(roundedRect: rect(44, 78, 32, 7.5), cornerRadius: 3.75 * unit), with: ink)
+            layer.fill(Path(roundedRect: rect(69, 54, 21, 7.5), cornerRadius: 3.75 * unit), with: ink)
+            layer.fill(Path(roundedRect: rect(51, 81, 18, 7.5), cornerRadius: 3.75 * unit), with: ink)
         }
     }
 
