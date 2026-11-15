@@ -1761,6 +1761,8 @@ extension BaseTerminalController {
                 ReviewSnapshots.shared.statusChanged(self, from: programStatus?.state, to: status?.state)
                 let old = programStatus?.state
                 programStatus = status
+                // At the end of a turn, show what the agent made.
+                AgentAutoOpen.shared.statusChanged(self, from: old, to: status?.state)
                 // In Grid View, maybe move the keyboard to this tile.
                 TerminalGridAttention.shared.statusChanged(self, from: old, to: status?.state)
                 (window as? TerminalWindow)?.programStatus = status

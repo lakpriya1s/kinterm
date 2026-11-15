@@ -1145,6 +1145,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         ReviewCenter.shared.installMenuItem()
         BrowserCenter.shared.installMenuItem()
         MarkdownViewerCenter.shared.installMenuItem()
+        AgentAutoOpen.shared.installMenuItem()
 
         // If we have a default size, we want to apply it.
         if let defaultSize {

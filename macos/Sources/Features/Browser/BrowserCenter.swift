@@ -225,8 +225,9 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
     }
 
     @MainActor
-    func hidePanel(for controller: BaseTerminalController) {
+    func hidePanel(for controller: BaseTerminalController, byUser: Bool = true) {
         guard let page = panels.removeValue(forKey: ObjectIdentifier(controller)) else { return }
+        if byUser { AgentAutoOpen.shared.dismissed(.browser, for: controller) }
         page.close()
         // Give the keyboard back to the terminal.
         if let surface = controller.focusedSurface { controller.focusSurface(surface) }
@@ -293,9 +294,12 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
     }
 
     /// Close a grid tile and give the keyboard back to the tab it was for.
+    /// Closed by the user, it stops the browser opening by itself for the
+    /// tab's agent session; an agent closing it (`byUser: false`) doesn't.
     @MainActor
-    func closeGridTile(_ page: BrowserPage) {
+    func closeGridTile(_ page: BrowserPage, byUser: Bool = true) {
         let owner = gridOwners[ObjectIdentifier(page)]?.value
+        if byUser { AgentAutoOpen.shared.dismissed(.browser, for: owner ?? self.owner(of: page)) }
         removeGridTile(page)
         page.close()
         if let owner { TerminalGridModel.shared.focus(owner) }
@@ -357,6 +361,7 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
         } else {
             showPanel(for: controller)
         }
+        if page(for: controller) != nil { AgentAutoOpen.shared.reopened(.browser, for: controller) }
     }
 
     /// The tab browsers open for when nothing says which: the key window's,
@@ -508,6 +513,7 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
     private func windowWillClose(_ window: NSWindow) {
         // A popped-out browser closes with its window.
         if let (id, entry) = windows.first(where: { $0.value.window === window }) {
+            AgentAutoOpen.shared.dismissed(.browser, for: entry.from.value)
             windows[id] = nil
             titleWatchers[id] = nil
             entry.page.close()
