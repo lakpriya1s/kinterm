@@ -371,9 +371,16 @@ async function handle(message) {
           capabilities: { tools: {} },
           serverInfo: { name: "kinterm", version: "1.0.0" },
           instructions:
-            "Tools for the KinTerm terminal you run in. Use `run` for long-running commands so the user can " +
-            "see them, `notify` when you finish something long, `review` when you hand work over, " +
-            "`markdown` to show the user a plan or doc you wrote, and agent_* to split a large task across other agents in their own tabs.",
+            "You are running inside KinTerm, a terminal with its own tools for showing the user your work. " +
+            "Use them instead of the generic way:\n" +
+            "- A web page, dev server or local HTML file: open it in KinTerm's browser beside the user's " +
+            "terminal (`kinterm-browser open URL`, or the kinterm-browser MCP tools), not `open`, Playwright " +
+            "or another browser.\n" +
+            "- A plan, notes or docs you wrote in Markdown: `markdown`, not pasted into the chat.\n" +
+            "- A long-running command (a dev server, tests): `run`, so it shows in a pane.\n" +
+            "- When you hand work over: `review`. When you finish something long: `notify`.\n" +
+            "- A large task with independent parts: agent_* to split it across agents in their own tabs.\n" +
+            "The kinterm skill has the details; load it before any of these.",
         },
       });
     case "ping":

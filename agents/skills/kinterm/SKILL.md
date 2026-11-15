@@ -1,12 +1,25 @@
 ---
 name: kinterm
-description: Use when running inside KinTerm (KINTERM_BROWSER_SOCKET is set) and working on anything with a web UI, a dev server or other long-running process, a long task the user may stop watching, a task big enough to split across several agents, changes the user will review, or a plan, notes or docs in Markdown the user should read. Shows the app in KinTerm's built-in browser, shows Markdown files rendered in KinTerm's Markdown Viewer, runs servers in a pane beside you, notifies the user, starts and coordinates agents in other tabs, and hands changes over for review.
+description: Load first whenever you run inside KinTerm (KINTERM_BROWSER_SOCKET is set) and are about to show the user anything - a web page, dev server or local HTML file, a Markdown plan or doc you wrote, a long-running command's output, or changes to review - or to split a big task across agents. Inside KinTerm these go to its own browser, Markdown Viewer, panes, notifications and review, never `open`, Playwright, another browser, or text pasted into the chat.
 ---
 
 # Working inside KinTerm
 
 KinTerm is the terminal you're running in. It has tools for showing the user
-your work. Use them when they help; they cost nothing when you don't.
+your work, and the user is watching it, not another app.
+
+**Rules.** When you would otherwise:
+
+| Reach for | Use instead |
+| --- | --- |
+| `open URL`, Playwright, a separate Chrome, to show or check a page | `kinterm-browser open URL`, or the `kinterm-browser` MCP tools |
+| Pasting a long plan, notes or a report into the chat | `kinterm-ctl markdown FILE` (`markdown`) |
+| Backgrounding a dev server or watcher with `&` | `kinterm-ctl run --name N -- CMD` (`run`) |
+| "Done" in the chat after a long task | `kinterm-ctl notify "…"` (`notify`) |
+| Listing the files you changed | `kinterm-ctl review FILE` (`review`) |
+
+The user is looking at KinTerm. Something opened anywhere else is out of
+their sight.
 
 ## Show web work in KinTerm's browser
 
