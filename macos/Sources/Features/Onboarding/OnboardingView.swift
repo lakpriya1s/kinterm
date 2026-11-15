@@ -391,10 +391,10 @@ extension OnboardingTools {
         case .idle, .working:
             OnboardingNote(
                 symbol: "sparkles",
-                text: "Connect Agents installs the KinTerm skill, so Claude Code and Codex know about these, "
-                    + (BrowserEngine.isInstalled
-                        ? "and lets Claude Code and Codex drive the browser. Restart running agents after."
-                        : "for each Claude Code and Codex account. Restart running agents after."))
+                text: "Connect Agents installs the KinTerm skill and tools, so Claude Code and Codex can run "
+                    + "servers in a pane, start agents in other tabs"
+                    + (BrowserEngine.isInstalled ? " and drive the browser" : "")
+                    + ". Restart running agents after.")
         case .done:
             let failed = connect.outcomes.filter { !$0.ok }
             OnboardingNote(

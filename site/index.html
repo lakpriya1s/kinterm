@@ -854,10 +854,11 @@ section[id]{scroll-margin-top:64px}
         </article>
         <article class="tile w4 reveal">
           <h3>One click to connect</h3>
-          <p>The Setup Assistant installs the KinTerm skill, so Claude Code knows about all this, and gives Claude Code and Codex the browser's tools. Nothing loads until you use it.</p>
+          <p>The Setup Assistant installs the KinTerm skill, so Claude Code knows about all this, and gives Claude Code and Codex KinTerm's tools and the browser's. Nothing loads until you use it.</p>
           <div class="demo">
             <div class="connect" aria-label="Connect Agents in the Setup Assistant">
               <div class="row">KinTerm skill <code>~/.claude/skills/kinterm</code></div>
+              <div class="row">KinTerm tools for Claude Code and Codex <code>kinterm-ctl mcp</code></div>
               <div class="row">Browser tools for Claude Code <code>kinterm-browser mcp</code></div>
               <div class="row">Browser tools for Codex <code>kinterm-browser mcp</code></div>
               <span class="go">Connect Agents</span>
@@ -886,6 +887,20 @@ section[id]{scroll-margin-top:64px}
               <div><span class="hl">&nbsp;&nbsp;app/pull/128</span></div>
               <div class="arrow">&#8595; &#8984;&#8679;C</div>
               <div>https://github.com/acme/app/pull/128</div>
+            </div>
+          </div>
+        </article>
+        <article class="tile w4 reveal">
+          <h3>One agent runs the others</h3>
+          <p>Agents in KinTerm can drive KinTerm. Ask one for a big change and it can split the work: start Claude Code or Codex workers in tabs of their own, each in its own git worktree, wait until they finish or need an answer, read what they did and reply. Every worker is a normal tab you can watch and type into. Agents also run dev servers in a pane beside them, notify you, and open the review at the file to look at first.</p>
+          <div class="demo">
+            <div class="mterm" aria-label="An agent starting two workers and waiting for them">
+              <div><span class="p">&#10095;</span> kinterm-ctl agent spawn --name api --worktree -- claude &quot;Add rate limiting&hellip;&quot;</div>
+              <div><span class="p">&#10095;</span> kinterm-ctl agent spawn --name docs -- claude &quot;Document the limits&hellip;&quot;</div>
+              <div><span class="p">&#10095;</span> kinterm-ctl agent wait api docs</div>
+              <div class="g">api: done</div>
+              <div class="r">docs: blocked</div>
+              <div><span class="p">&#10095;</span> kinterm-ctl agent send docs &quot;Put them in docs/api.md.&quot;</div>
             </div>
           </div>
         </article>

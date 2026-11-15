@@ -254,6 +254,7 @@ Claude Code hook ──OSC 7501 (state, account, context, last)─────�
 | Window | `Features/Terminal/TerminalView.swift` (hosts the bar), `TerminalController.swift` (owns the model, installs shortcuts), `Window Styles/TerminalWindow.swift` (hides the native tab bar and its faces, Title Bar position), `TransparentTitlebarTerminalWindow.swift` (clears its title bar paint for it), `App/AppDelegate.swift` (dock badge count, notification categories, starts the summary) |
 | Reopen after restart | `Features/Terminal/TerminalResume.swift` (agent session records → `claude --resume` / `codex resume`; output saved every 20 s and on quit, played back on restore), `Surface View/SurfaceView_AppKit.swift` (`init(from:)` calls it), `App/AppDelegate.swift` (starts it, saves on quit), `src/apprt/embedded.zig` (`ghostty_surface_read_restore_text`, `ghostty_surface_restore_output`), both hooks (write `~/.config/kinterm/sessions/<KINTERM_SURFACE_ID>`) |
 | Copy agent text whole | `src/terminal/hard_wrap.zig` (joins lines an agent broke at the window's edge), `src/Surface.zig` (`copy_to_clipboard:unwrapped`, `cutLinkAtPin` for links split across lines), `src/renderer/link.zig` (hover underline), `src/config/Config.zig` (⌘⇧C) |
+| Agents drive KinTerm | `Features/Control/KinTermControl.swift` (commands on the browser socket; `AgentWorkers` registry of tabs and panes agents started), `Features/Control/ControlPeer.swift` (proves which terminal a request came from), `Features/Browser/BrowserControlServer.swift` (routes them), `Browser/bin/kinterm-ctl` (CLI, POSIX sh + JXA) and `kinterm-ctl-mcp.mjs` (the `kinterm` MCP server), `Ghostty.App.swift` (`commandFinished` settles workers whose command exited), `BrowserAgentInstaller.swift` (registers it) |
 | Dev | `scripts/dev-run.sh` (strips `CLAUDE*` from the app's environment) |
 
 Key decisions in the code:
@@ -304,6 +305,18 @@ Key decisions in the code:
   quitting or crashing KinTerm keeps it. Before resuming a Claude session
   KinTerm checks `<config>/projects/*/<id>.jsonl` exists. Agent tabs don't
   save output; the agent shows the conversation itself.
+- **Agent control is scoped by pty, not by token.** A request names its
+  terminal (`KINTERM_SURFACE_ID`); KinTerm takes the socket peer's pid
+  (`LOCAL_PEERPID`) and accepts it only if that process or an ancestor has
+  the terminal's tty as its controlling terminal. Environment tokens are
+  readable with `ps -E`, so they'd prove nothing. An agent controls only
+  the tabs and panes it started (12 at most); a worker can't start workers
+  unless spawned with `--allow-spawn`. Inside tmux the check fails (pane
+  processes aren't descendants of the pty). The registry isn't saved, so
+  after a restart workers are ordinary tabs. `agent wait` settles on hook
+  status (OSC 7501) newer than the last input, or on the shell's
+  command-finished event. The CLI is `kinterm-ctl` because the app's own
+  executable in `Contents/MacOS` is `kinterm`.
 - **Test the debug app from a clean environment** (`scripts/dev-run.sh`, or
   `env -i HOME=$HOME open -n …`). Launched from inside a Claude Code session,
   its terminals inherit `CLAUDE_CODE_*` and every `claude` in them runs as a
