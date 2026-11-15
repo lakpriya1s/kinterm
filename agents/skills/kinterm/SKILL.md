@@ -1,6 +1,6 @@
 ---
 name: kinterm
-description: Use when running inside KinTerm (KINTERM_BROWSER_SOCKET is set) and working on anything with a web UI, a dev server or other long-running process, a long task the user may stop watching, a task big enough to split across several agents, or changes the user will review. Shows the app in KinTerm's built-in browser, runs servers in a pane beside you, notifies the user, starts and coordinates agents in other tabs, and hands changes over for review.
+description: Use when running inside KinTerm (KINTERM_BROWSER_SOCKET is set) and working on anything with a web UI, a dev server or other long-running process, a long task the user may stop watching, a task big enough to split across several agents, changes the user will review, or a plan, notes or docs in Markdown the user should read. Shows the app in KinTerm's built-in browser, shows Markdown files rendered in KinTerm's Markdown Viewer, runs servers in a pane beside you, notifies the user, starts and coordinates agents in other tabs, and hands changes over for review.
 ---
 
 # Working inside KinTerm
@@ -68,6 +68,17 @@ of the repository, revert per hunk, and comments that come back to you as
 a message. When you finish a task, open it at the file to look at first:
 `kinterm-ctl review src/auth.ts` (`review`, with `files`). Comments
 arrive as a list of `file:line` notes; address each one.
+
+## Show Markdown you wrote
+
+When you write a plan, a design note, a report or docs the user should
+read, show it rendered in KinTerm's Markdown Viewer instead of pasting it
+into the chat: `kinterm-ctl markdown docs/plan.md` (`markdown`, with
+`path`). It opens in a window of its own with the folder's other Markdown
+files beside it, and reloads as you edit the file, so open it once and keep
+writing. Give a folder (`kinterm-ctl markdown docs`) to open the viewer on
+its Markdown files. The user can also open it with ⌘⇧M, or by ⌘-clicking a
+`.md` path you print.
 
 ## Split big work across agents
 

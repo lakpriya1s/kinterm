@@ -3,7 +3,8 @@ import Foundation
 
 /// The `kinterm-ctl` commands that act on terminals rather than the browser:
 /// panes and agent tabs a terminal starts, reading and typing into them,
-/// its own scrollback, status, notifications and the review. They come in
+/// its own scrollback, status, notifications, the review and the Markdown
+/// Viewer. They come in
 /// over the browser's socket (`BrowserControlServer`), which hands them
 /// here.
 ///
@@ -15,7 +16,7 @@ import Foundation
 enum KinTermControl {
     static let commands: Set<String> = [
         "spawn", "workers", "read", "send", "kill", "release",
-        "scrollback", "notify", "set-status", "review",
+        "scrollback", "notify", "set-status", "review", "markdown",
     ]
 
     /// At most this many workers per terminal, so a runaway loop can't
@@ -110,6 +111,17 @@ enum KinTermControl {
             let files = request["files"] as? [String] ?? []
             let directory = (request["directory"] as? String).flatMap { $0.hasPrefix("/") ? $0 : nil }
             ReviewCenter.shared.show(for: controller, files: files, directory: directory)
+
+        case "markdown":
+            guard let path = request["path"] as? String, path.hasPrefix("/") else {
+                return fail("Say which Markdown file or folder to show.")
+            }
+            switch MarkdownViewerCenter.target(path) {
+            case .file(let url): MarkdownViewerCenter.shared.open(file: url)
+            case .folder(let url): MarkdownViewerCenter.shared.open(folder: url)
+            case .missing: return fail("There's nothing at \(path).")
+            case .notMarkdown: return fail("\(path) isn't a Markdown file (.md, .markdown, .mdx).")
+            }
 
         default:
             return fail("Unknown command \(command).")

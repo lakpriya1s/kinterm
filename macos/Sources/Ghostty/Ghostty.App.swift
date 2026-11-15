@@ -813,6 +813,11 @@ extension Ghostty {
         ) -> Bool {
             let action = Ghostty.Action.OpenURL(c: v)
 
+            // Markdown files open in KinTerm's Markdown Viewer.
+            if action.kind != .osc8, MarkdownViewerCenter.shared.openLink(action.url) {
+                return true
+            }
+
             // OSC 8 targets are producer-controlled terminal output. Keep them
             // out of the unrestricted generic opener so unsafe local files and
             // deceptive targets cannot reach Launch Services directly.

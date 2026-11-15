@@ -64,3 +64,40 @@ struct KinTermControlTailTests {
         #expect(KinTermControl.tail("", lines: 5) == "")
     }
 }
+
+struct MarkdownViewerTargetTests {
+    @Test func tellsFilesFoldersAndTheRestApart() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kinterm-md-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let plan = dir.appendingPathComponent("plan.md")
+        let code = dir.appendingPathComponent("main.swift")
+        try Data("# Plan".utf8).write(to: plan)
+        try Data("".utf8).write(to: code)
+
+        #expect(MarkdownViewerCenter.target(plan.path) == .file(plan.standardizedFileURL))
+        #expect(MarkdownViewerCenter.target(dir.path) == .folder(dir.standardizedFileURL))
+        #expect(MarkdownViewerCenter.target(code.path) == .notMarkdown)
+        #expect(MarkdownViewerCenter.target(dir.appendingPathComponent("gone.md").path) == .missing)
+    }
+}
+
+struct MarkdownRendererTests {
+    private func render(_ text: String) -> String {
+        MarkdownRenderer.page(text, file: URL(fileURLWithPath: "/tmp/x.md"))
+    }
+
+    @Test func rendersTheCommonBlocks() {
+        let html = render("# Title\n\n- [x] done\n- todo\n\n| a | b |\n|---|--:|\n| 1 | 2 |\n\n```sh\necho hi\n```\n")
+        #expect(html.contains("<h1 id=\"title\">Title</h1>"))
+        #expect(html.contains("<input type=\"checkbox\" checked disabled> done"))
+        #expect(html.contains("<th style=\"text-align:right\">b</th>"))
+        #expect(html.contains("<code class=\"language-sh\">"))
+    }
+
+    @Test func escapesTextAndKeepsLinks() {
+        let html = render("1 < 2 and **bold** [docs](docs/a.md#top)")
+        #expect(html.contains("1 &lt; 2 and <strong>bold</strong> <a href=\"docs/a.md#top\">docs</a>"))
+    }
+}

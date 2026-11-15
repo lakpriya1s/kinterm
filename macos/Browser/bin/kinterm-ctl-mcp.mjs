@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // MCP server for KinTerm itself, run by `kinterm-ctl mcp`: the `kinterm-ctl`
 // commands as tools. An agent can run things in a pane beside it, read
-// them, say how it's doing, notify you, open the review, and start other
-// agents in tabs of their own and work with them.
+// them, say how it's doing, notify you, open the review or the Markdown
+// Viewer, and start other agents in tabs of their own and work with them.
 //
 // It speaks to KinTerm over the same socket as `kinterm-ctl` and
 // `kinterm-browser`. KinTerm checks every request comes from the terminal
@@ -201,6 +201,24 @@ const tools = [
     },
   },
   {
+    name: "markdown",
+    description:
+      "Show a Markdown file in KinTerm's Markdown Viewer, a window that renders it and reloads as the file " +
+      "changes. Use it to show the user a plan, notes or docs you wrote. Give a folder instead to open the " +
+      "viewer on its Markdown files.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "A .md file, or a folder. Relative paths are from your directory." },
+      },
+      required: ["path"],
+    },
+    async call(a) {
+      await ask({ cmd: "markdown", path: path.resolve(process.cwd(), a.path ?? ".") });
+      return "It's open in the Markdown Viewer.";
+    },
+  },
+  {
     name: "scrollback",
     description: "Your own terminal's text, e.g. output that scrolled past.",
     inputSchema: { type: "object", properties: { lines: num("How many lines (default 200).") } },
@@ -354,8 +372,8 @@ async function handle(message) {
           serverInfo: { name: "kinterm", version: "1.0.0" },
           instructions:
             "Tools for the KinTerm terminal you run in. Use `run` for long-running commands so the user can " +
-            "see them, `notify` when you finish something long, `review` when you hand work over, and " +
-            "agent_* to split a large task across other agents in their own tabs.",
+            "see them, `notify` when you finish something long, `review` when you hand work over, " +
+            "`markdown` to show the user a plan or doc you wrote, and agent_* to split a large task across other agents in their own tabs.",
         },
       });
     case "ping":
