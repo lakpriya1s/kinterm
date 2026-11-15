@@ -31,6 +31,11 @@ kinterm-browser reload               # after a change
 kinterm-browser status               # what's open
 ```
 
+If a page stays blank or the browser tools hang, check `kinterm-browser
+status`: `"responding": false` means the browser stalled. `kinterm-browser
+reload` (or `close`, then `open`) gets it going again; KinTerm doesn't need
+a restart.
+
 `kinterm-browser` is on the PATH of every KinTerm terminal. Opening the
 browser doesn't take the keyboard from the user. The browser is your tab's:
 it opens beside the terminal you run in, and the MCP tools only see that

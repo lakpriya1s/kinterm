@@ -177,11 +177,13 @@ final class BrowserControlServer {
         switch command {
         case "status":
             reply["running"] = BrowserEngine.isRunning
+            if let responding = BrowserEngine.isResponding { reply["responding"] = responding }
             reply["pages"] = center.allPages.map { ["url": $0.url, "title": $0.title] }
 
         case "open", "start":
             guard BrowserEngine.isInstalled else { return fail(BrowserEngine.Failure.notInstalled.localizedDescription) }
             if case .failure(let failure) = BrowserEngine.start() { return fail(failure.localizedDescription) }
+            BrowserEngine.recover()
             guard let page = page(opening: true) else { return fail("Open a KinTerm window first.") }
             reply["url"] = page.url
             // Null while the page is still opening; ask again.
@@ -189,6 +191,7 @@ final class BrowserControlServer {
 
         case "close":
             guard let controller = tab else { return fail("No KinTerm window is open.") }
+            BrowserEngine.recover()
             if let window = controller.gridWindow ?? controller.window,
                let page = center.gridPage(of: controller, in: window) {
                 center.closeGridTile(page)

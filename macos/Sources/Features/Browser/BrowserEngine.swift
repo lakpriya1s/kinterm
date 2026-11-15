@@ -20,6 +20,7 @@ enum BrowserEngine {
     private typealias HandleIntFn = @convention(c) (UnsafeMutableRawPointer, Int32) -> Void
     private typealias HandleFn = @convention(c) (UnsafeMutableRawPointer) -> Void
     private typealias VoidFn = @convention(c) () -> Void
+    private typealias SecondsFn = @convention(c) () -> Double
 
     private struct API {
         let initialize: InitializeFn
@@ -34,6 +35,9 @@ enum BrowserEngine {
         let edit: HandleIntFn?
         let close: HandleFn
         let shutdown: VoidFn
+        /// Missing from a module older than this KinTerm.
+        let stalledSeconds: SecondsFn?
+        let recover: VoidFn?
     }
 
     enum Command: Int32 { case back = 0, forward, reload, stop, hardReload }
@@ -146,7 +150,9 @@ enum BrowserEngine {
         api = API(
             initialize: initialize, create: create, navigate: navigate, command: command,
             setFocus: setFocus, showDevTools: showDevTools, execute: execute, closeDevTools: closeDevTools,
-            edit: symbol("kt_browser_edit", HandleIntFn.self), close: close, shutdown: shutdown)
+            edit: symbol("kt_browser_edit", HandleIntFn.self), close: close, shutdown: shutdown,
+            stalledSeconds: symbol("kt_browser_stalled_seconds", SecondsFn.self),
+            recover: symbol("kt_browser_recover", VoidFn.self))
         isRunning = true
 
         // Chromium's processes end with KinTerm.
@@ -171,6 +177,8 @@ enum BrowserEngine {
     }
 
     static func run(_ command: Command, on handle: UnsafeMutableRawPointer) {
+        // Reload is what you press when a page is stuck.
+        if command == .reload || command == .hardReload { recover() }
         api?.command(handle, command.rawValue)
     }
 
@@ -198,6 +206,20 @@ enum BrowserEngine {
 
     static func close(_ handle: UnsafeMutableRawPointer) {
         api?.close(handle)
+    }
+
+    // MARK: Health
+
+    /// Whether Chromium is doing its work. Nil when the module can't tell.
+    static var isResponding: Bool? {
+        guard let stalled = api?.stalledSeconds else { return nil }
+        return stalled() < 3
+    }
+
+    /// Get Chromium's work going again if it stalled. Called when a browser
+    /// is opened or closed on purpose, so doing that unsticks it.
+    static func recover() {
+        api?.recover?()
     }
 
     // MARK: Helpers

@@ -138,9 +138,13 @@ static void InstallSendEventHook() {
 
 static const int64_t kMaxTimerDelayMs = 1000 / 30;
 static NSTimer* g_pump_timer = nil;
+static NSTimer* g_watchdog = nil;
 static bool g_in_work = false;
 static bool g_reentered = false;
 static int g_open_browsers = 0;
+// When work last finished, and when the work under way started.
+static CFAbsoluteTime g_last_work = 0;
+static CFAbsoluteTime g_work_started = 0;
 
 static void ScheduleWork(int64_t delay_ms);
 
@@ -149,15 +153,32 @@ static void KillPumpTimer() {
   g_pump_timer = nil;
 }
 
+// In CEF's work for as long as this lives. A destructor, so the flag is
+// cleared even when something unwinds through CefDoMessageLoopWork (an
+// Objective-C exception AppKit catches, say): left set, every later DoWork
+// would return early and the browser would stop for good while the
+// terminal kept working.
+struct WorkScope {
+  WorkScope() {
+    g_in_work = true;
+    g_work_started = CFAbsoluteTimeGetCurrent();
+  }
+  ~WorkScope() {
+    g_in_work = false;
+    g_last_work = CFAbsoluteTimeGetCurrent();
+  }
+};
+
 static void DoWork() {
   if (g_in_work) {
     g_reentered = true;
     return;
   }
   g_reentered = false;
-  g_in_work = true;
-  CefDoMessageLoopWork();
-  g_in_work = false;
+  {
+    WorkScope scope;
+    CefDoMessageLoopWork();
+  }
   if (g_reentered) {
     ScheduleWork(0);
   } else if (!g_pump_timer && g_open_browsers > 0) {
@@ -183,6 +204,23 @@ static void ScheduleWork(int64_t delay_ms) {
   g_pump_timer.tolerance = seconds / 2;
   // Common modes, so pages keep going during menus and window resizes.
   [[NSRunLoop mainRunLoop] addTimer:g_pump_timer forMode:NSRunLoopCommonModes];
+}
+
+// Whatever else goes wrong, a browser that's open keeps getting work: if
+// none has finished for a second and none is under way, do some, which
+// also starts the timer again.
+static void StartWatchdog() {
+  if (g_watchdog) return;
+  g_watchdog = [NSTimer timerWithTimeInterval:1.0
+                                      repeats:YES
+                                        block:^(NSTimer*) {
+                                          if (g_open_browsers > 0 && !g_in_work &&
+                                              CFAbsoluteTimeGetCurrent() - g_last_work > 1.0) {
+                                            DoWork();
+                                          }
+                                        }];
+  g_watchdog.tolerance = 0.5;
+  [[NSRunLoop mainRunLoop] addTimer:g_watchdog forMode:NSRunLoopCommonModes];
 }
 
 // MARK: - App
@@ -524,8 +562,33 @@ KT_EXPORT int kt_browser_initialize(const char* framework_dir, const char* helpe
   CefRefPtr<KTApp> app(new KTApp);
   if (!CefInitialize(args, settings, app, nullptr)) return 2;
   g_initialized = true;
+  g_last_work = CFAbsoluteTimeGetCurrent();
   ScheduleWork(0);
+  StartWatchdog();
   return 0;
+}
+
+// Seconds since CEF's work last finished while a browser is open; 0 when
+// it's keeping up or nothing is open. Over a few seconds, the browser has
+// stopped responding.
+KT_EXPORT double kt_browser_stalled_seconds(void) {
+  if (!g_initialized || g_open_browsers == 0) return 0;
+  double age = CFAbsoluteTimeGetCurrent() - (g_in_work ? g_work_started : g_last_work);
+  return age > 1.0 ? age : 0;
+}
+
+// Get a stalled browser going again, when someone opens or closes it on
+// purpose. Called from the main run loop, outside CEF's work: if the flag
+// still says CEF is working, nothing is, so it's cleared.
+KT_EXPORT void kt_browser_recover(void) {
+  if (!g_initialized) return;
+  if (g_in_work && CFAbsoluteTimeGetCurrent() - g_work_started > 2.0) {
+    NSLog(@"KinTerm browser: the message pump was stuck for %.0f s; restarting it.",
+          CFAbsoluteTimeGetCurrent() - g_work_started);
+    g_in_work = false;
+  }
+  KillPumpTimer();
+  DoWork();
 }
 
 // Make a browser filling parent (an NSView), loading url. Events go to fn
@@ -624,6 +687,8 @@ KT_EXPORT void kt_browser_shutdown(void) {
     [NSThread sleepForTimeInterval:0.01];
   }
   KillPumpTimer();
+  [g_watchdog invalidate];
+  g_watchdog = nil;
   CefShutdown();
   g_initialized = false;
 }
