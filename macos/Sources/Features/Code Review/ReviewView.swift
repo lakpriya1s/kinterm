@@ -779,6 +779,11 @@ private struct ReviewDiffHeader: View {
                 model.viewer = .file(file.path)
             }
             .disabled(file.status == .deleted)
+            if MarkdownRenderer.isMarkdown(file.path), file.status != .deleted, let url = model.url(for: file.path) {
+                ReviewIconButton(symbol: "doc.richtext", help: "Open in Markdown Viewer") {
+                    MarkdownViewerCenter.shared.open(file: url)
+                }
+            }
             ReviewIconButton(symbol: "arrow.uturn.backward", help: "Revert This File…") { confirmRevert() }
             Toggle("Viewed", isOn: Binding(
                 get: { model.isViewed(file) },
@@ -824,6 +829,11 @@ private struct ReviewFileHeader: View {
                     model.viewer = .diff(path)
                 }
                 .controlSize(.small)
+            }
+            if MarkdownRenderer.isMarkdown(path), let url = model.url(for: path) {
+                ReviewIconButton(symbol: "doc.richtext", help: "Open in Markdown Viewer") {
+                    MarkdownViewerCenter.shared.open(file: url)
+                }
             }
             if let url = model.url(for: path) {
                 ReviewIconButton(symbol: "arrow.up.forward.app", help: "Open in Default App") {

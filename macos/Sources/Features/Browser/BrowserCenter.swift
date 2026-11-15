@@ -345,6 +345,7 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
 
     @MainActor
     func toggle(for controller: BaseTerminalController) {
+        BrowserEngine.recover()
         if inGrid(controller), let window = controller.gridWindow ?? controller.window {
             if let page = gridPage(of: controller, in: window) {
                 closeGridTile(page)

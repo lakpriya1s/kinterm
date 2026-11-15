@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // MCP server for KinTerm itself, run by `kinterm-ctl mcp`: the `kinterm-ctl`
 // commands as tools. An agent can run things in a pane beside it, read
-// them, say how it's doing, notify you, open the review, and start other
-// agents in tabs of their own and work with them.
+// them, say how it's doing, notify you, open the review or the Markdown
+// Viewer, and start other agents in tabs of their own and work with them.
 //
 // It speaks to KinTerm over the same socket as `kinterm-ctl` and
 // `kinterm-browser`. KinTerm checks every request comes from the terminal
@@ -201,6 +201,24 @@ const tools = [
     },
   },
   {
+    name: "markdown",
+    description:
+      "Show a Markdown file in KinTerm's Markdown Viewer, a window that renders it and reloads as the file " +
+      "changes. Use it to show the user a plan, notes or docs you wrote. Give a folder instead to open the " +
+      "viewer on its Markdown files.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "A .md file, or a folder. Relative paths are from your directory." },
+      },
+      required: ["path"],
+    },
+    async call(a) {
+      await ask({ cmd: "markdown", path: path.resolve(process.cwd(), a.path ?? ".") });
+      return "It's open in the Markdown Viewer.";
+    },
+  },
+  {
     name: "scrollback",
     description: "Your own terminal's text, e.g. output that scrolled past.",
     inputSchema: { type: "object", properties: { lines: num("How many lines (default 200).") } },
@@ -353,9 +371,16 @@ async function handle(message) {
           capabilities: { tools: {} },
           serverInfo: { name: "kinterm", version: "1.0.0" },
           instructions:
-            "Tools for the KinTerm terminal you run in. Use `run` for long-running commands so the user can " +
-            "see them, `notify` when you finish something long, `review` when you hand work over, and " +
-            "agent_* to split a large task across other agents in their own tabs.",
+            "You are running inside KinTerm, a terminal with its own tools for showing the user your work. " +
+            "Use them instead of the generic way:\n" +
+            "- A web page, dev server or local HTML file: open it in KinTerm's browser beside the user's " +
+            "terminal (`kinterm-browser open URL`, or the kinterm-browser MCP tools), not `open`, Playwright " +
+            "or another browser.\n" +
+            "- A plan, notes or docs you wrote in Markdown: `markdown`, not pasted into the chat.\n" +
+            "- A long-running command (a dev server, tests): `run`, so it shows in a pane.\n" +
+            "- When you hand work over: `review`. When you finish something long: `notify`.\n" +
+            "- A large task with independent parts: agent_* to split it across agents in their own tabs.\n" +
+            "The kinterm skill has the details; load it before any of these.",
         },
       });
     case "ping":

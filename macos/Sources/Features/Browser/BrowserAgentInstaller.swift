@@ -5,9 +5,10 @@ import AppKit
 /// Browser…):
 /// - the KinTerm skill (agents/skills/kinterm/SKILL.md), into each Claude
 ///   Code and Codex account's `skills/kinterm/`, which tells agents about
-///   the browser and Review Changes;
-/// - two MCP servers: `kinterm` (panes, notifications, the review, and
-///   agents in other tabs: `kinterm-ctl mcp`) and, with the browser,
+///   the browser, Review Changes and the Markdown Viewer;
+/// - two MCP servers: `kinterm` (panes, notifications, the review, the
+///   Markdown Viewer, and agents in other tabs: `kinterm-ctl mcp`) and,
+///   with the browser,
 ///   `kinterm-browser`. The CLIs are copied to `~/.config/kinterm/browser/`
 ///   (a path that stays put when KinTerm moves) and added to each Claude
 ///   Code and Codex account, with their own `mcp add` commands.

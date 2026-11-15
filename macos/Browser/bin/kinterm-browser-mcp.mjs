@@ -631,6 +631,13 @@ function startProxy() {
 
 let child = null;
 let proxyPort = null;
+const INSTRUCTIONS =
+  "This is KinTerm's browser, beside the user's terminal: the user sees every page you open here. " +
+  "Use it, not another browser tool (Playwright, a separate Chrome) or `open`, whenever you show the user a " +
+  "web page or check one: a dev server, a local HTML file (serve its folder first), a site. Navigate, take a " +
+  "snapshot, click and fill like a user, then read the console and network requests for errors. " +
+  "From a shell, `kinterm-browser open URL` opens a page without these tools.";
+
 let initializeMessage = null; // The client's, replayed when the child restarts.
 const hiddenIds = new Set(); // Replies to our replayed requests, not the client's.
 
@@ -653,6 +660,14 @@ function startChild() {
       if (message.id !== undefined && hiddenIds.delete(message.id)) return;
       if (message.id !== undefined && activeCalls.delete(message.id) && activeCalls.size === 0) {
         ask({ cmd: "agent", active: false, target: browser.target ?? undefined }).catch(() => {});
+      }
+      // Say what this browser is, ahead of DevTools' own instructions:
+      // agents otherwise reach for whatever browser tool they know.
+      if (initializeMessage && message.id === initializeMessage.id && message.result) {
+        const theirs = message.result.instructions;
+        message.result.instructions = INSTRUCTIONS + (theirs ? "\n\n" + theirs : "");
+        process.stdout.write(JSON.stringify(message) + "\n");
+        return;
       }
     } catch {
       // Not JSON; pass it on as it is.
