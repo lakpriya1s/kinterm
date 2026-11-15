@@ -255,6 +255,7 @@ Claude Code hook ──OSC 7501 (state, account, context, last)─────�
 | Reopen after restart | `Features/Terminal/TerminalResume.swift` (agent session records → `claude --resume` / `codex resume`; output saved every 20 s and on quit, played back on restore), `Surface View/SurfaceView_AppKit.swift` (`init(from:)` calls it), `App/AppDelegate.swift` (starts it, saves on quit), `src/apprt/embedded.zig` (`ghostty_surface_read_restore_text`, `ghostty_surface_restore_output`), both hooks (write `~/.config/kinterm/sessions/<KINTERM_SURFACE_ID>`) |
 | Copy agent text whole | `src/terminal/hard_wrap.zig` (joins lines an agent broke at the window's edge), `src/Surface.zig` (`copy_to_clipboard:unwrapped`, `cutLinkAtPin` for links split across lines), `src/renderer/link.zig` (hover underline), `src/config/Config.zig` (⌘⇧C) |
 | Agents drive KinTerm | `Features/Control/KinTermControl.swift` (commands on the browser socket; `AgentWorkers` registry of tabs and panes agents started), `Features/Control/ControlPeer.swift` (proves which terminal a request came from), `Features/Browser/BrowserControlServer.swift` (routes them), `Browser/bin/kinterm-ctl` (CLI, POSIX sh + JXA) and `kinterm-ctl-mcp.mjs` (the `kinterm` MCP server), `Ghostty.App.swift` (`commandFinished` settles workers whose command exited), `BrowserAgentInstaller.swift` (registers it) |
+| Markdown Viewer | `Features/Markdown Viewer/MarkdownRenderer.swift` (GitHub-flavored Markdown → HTML, code colored by `ReviewHighlighter`, local images embedded), `MarkdownViewerModel.swift` (file list from `git ls-files`, watches the open file), `MarkdownViewerView.swift` (sidebar, WebKit page), `MarkdownViewerCenter.swift` (windows, ⌘⇧M, ⌘-clicked `.md` paths); `kinterm-ctl markdown` via `KinTermControl.swift` |
 | Dev | `scripts/dev-run.sh` (strips `CLAUDE*` from the app's environment) |
 
 Key decisions in the code:
@@ -317,6 +318,14 @@ Key decisions in the code:
   status (OSC 7501) newer than the last input, or on the shell's
   command-finished event. The CLI is `kinterm-ctl` because the app's own
   executable in `Contents/MacOS` is `kinterm`.
+- **The Markdown Viewer renders in WebKit with page scripts off**
+  (`allowsContentJavaScript = false`), since Markdown can carry raw HTML.
+  Pages load with `loadHTMLString`, which can't read local files, so local
+  images (Markdown and raw `<img src>`) are embedded as data URLs, up to
+  10 MB each. The file is watched with a dispatch source and watched again
+  after a delete or rename, because editors and agents save by renaming a
+  new file over the old one. It uses the system's WebKit, not the
+  browser's Chromium module, so it works in builds without the browser.
 - **Test the debug app from a clean environment** (`scripts/dev-run.sh`, or
   `env -i HOME=$HOME open -n …`). Launched from inside a Claude Code session,
   its terminals inherit `CLAUDE_CODE_*` and every `claude` in them runs as a

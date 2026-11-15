@@ -392,7 +392,7 @@ extension OnboardingTools {
             OnboardingNote(
                 symbol: "sparkles",
                 text: "Connect Agents installs the KinTerm skill and tools, so Claude Code and Codex can run "
-                    + "servers in a pane, start agents in other tabs"
+                    + "servers in a pane, show you Markdown, start agents in other tabs"
                     + (BrowserEngine.isInstalled ? " and drive the browser" : "")
                     + ". Restart running agents after.")
         case .done:
