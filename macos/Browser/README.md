@@ -22,6 +22,8 @@ you already have.
 | `src/helper_main.mm`         | Chromium's helper processes (`KinTerm Helper (…).app`), sandboxed     |
 | `bin/kinterm-browser`        | The CLI, in `Contents/MacOS` so terminals have it on their PATH       |
 | `bin/kinterm-browser-mcp.mjs`| MCP server: Chrome DevTools MCP on this browser, started on first use |
+| `bin/kinterm-ctl`            | The CLI for KinTerm itself: panes, status, notify, review, agent tabs |
+| `bin/kinterm-ctl-mcp.mjs`    | MCP server with `kinterm-ctl`'s commands as tools                     |
 | `embed.sh`                   | Xcode build phase: copy into the app and sign                         |
 
 The Swift side is `macos/Sources/Features/Browser`.

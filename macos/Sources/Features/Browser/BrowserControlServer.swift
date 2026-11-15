@@ -7,6 +7,9 @@ import GhosttyKit
 /// readable only by you. It waits without using any CPU, and loads nothing
 /// of the browser until a request needs a browser.
 ///
+/// Commands for terminals rather than the browser (`spawn`, `send`,
+/// `notify`…) go to `KinTermControl`.
+///
 /// Requests: `{"cmd": "status" | "open" | "start" | "close" | "reload" |
 /// "back" | "forward" | "devtools" | "window", "url": "…"}`, and `{"cmd": "agent",
 /// "active": true | false}` around an agent's tool calls, which shows its
@@ -104,8 +107,13 @@ final class BrowserControlServer {
         }
 
         let request = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        // Who connected, to check the terminal the request names.
+        let peer = ControlPeer.pid(of: client)
         DispatchQueue.main.async {
-            let reply = Self.handle(request)
+            let command = request["cmd"] as? String ?? "status"
+            let reply = KinTermControl.commands.contains(command)
+                ? KinTermControl.handle(request, peer: peer)
+                : Self.handle(request, peer: peer)
             self.queue.async {
                 var out = (try? JSONSerialization.data(withJSONObject: reply, options: [.withoutEscapingSlashes])) ?? Data()
                 out.append(UInt8(ascii: "\n"))
@@ -118,7 +126,7 @@ final class BrowserControlServer {
     // MARK: Requests
 
     @MainActor
-    private static func handle(_ request: [String: Any]) -> [String: Any] {
+    private static func handle(_ request: [String: Any], peer: pid_t?) -> [String: Any] {
         let center = BrowserCenter.shared
         let url = (request["url"] as? String).flatMap(BrowserPage.normalize)
         var reply: [String: Any] = [
@@ -132,6 +140,14 @@ final class BrowserControlServer {
         if surfaceID != nil, fromSurface == nil, request["cmd"] as? String != "status" {
             reply["ok"] = false
             reply["error"] = "The terminal this came from is closed."
+            return reply
+        }
+        // A process that names another terminal than its own gets nothing.
+        // (When it can't be told, as before: the browser only shows pages.)
+        if let surfaceID, let (_, surface) = KinTermControl.surface(id: surfaceID),
+           ControlPeer.isFrom(peer, surface: surface) == false {
+            reply["ok"] = false
+            reply["error"] = "This didn't come from the terminal it names."
             return reply
         }
         let tab = fromSurface ?? center.frontController

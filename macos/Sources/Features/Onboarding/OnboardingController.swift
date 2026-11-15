@@ -16,7 +16,7 @@ final class OnboardingController: NSWindowController, NSWindowDelegate {
     /// page existed see it once, alone, as "What's New". Bump with a new
     /// page and list it in `OnboardingView.Mode.whatsNew`.
     private static let featuresKey = "OnboardingFeaturesSeen"
-    private static let features = 2
+    private static let features = 3
 
     private var mode: OnboardingView.Mode = .setup
 

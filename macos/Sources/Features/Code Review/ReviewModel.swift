@@ -144,7 +144,15 @@ final class ReviewModel: ObservableObject {
     /// Every change, in every repository.
     private var allChanges: [ReviewFileDiff] = []
     /// The changes shown: in the focused repository, and not excluded.
-    @Published private(set) var files: [ReviewFileDiff] = [] { didSet { rebuildChangeTree() } }
+    @Published private(set) var files: [ReviewFileDiff] = [] {
+        didSet {
+            rebuildChangeTree()
+            revealPending()
+        }
+    }
+    /// Files an agent asked to show (`kinterm-ctl review`), opened once the
+    /// changes have loaded.
+    private var pendingReveal: [String] = []
     /// Changes left out because `files.exclude` hides them.
     @Published private(set) var excludedCount = 0
     /// Changes shown per repository, by prefix, for the repository menu.
@@ -224,6 +232,31 @@ final class ReviewModel: ObservableObject {
     var isMultiRepo: Bool { repos.count > 1 }
 
     func repo(_ prefix: String) -> ReviewRepo? { repos.first { $0.prefix == prefix } }
+
+    /// Open the first of `paths` (absolute, or relative to the review's
+    /// folder) that has changes, or else the first one as a file.
+    func reveal(files paths: [String]) {
+        pendingReveal = paths
+        if !loading { revealPending() }
+    }
+
+    private func revealPending() {
+        guard !pendingReveal.isEmpty, let root else { return }
+        let wanted = pendingReveal.map { path -> String in
+            path.hasPrefix(root + "/") ? String(path.dropFirst(root.count + 1)) : path
+        }
+        pendingReveal = []
+        for path in wanted {
+            if let file = files.first(where: { $0.path == path || $0.path.hasSuffix("/" + path) }) {
+                viewer = .diff(file.path)
+                return
+            }
+        }
+        if let first = wanted.first, !first.hasPrefix("/"), repo(containing: first) != nil {
+            tab = .files
+            viewer = .file(first)
+        }
+    }
 
     /// The repository a workspace path is in: the one with the longest
     /// matching prefix.
@@ -360,9 +393,23 @@ final class ReviewModel: ObservableObject {
 
     // MARK: Loading
 
-    /// The repository of the tab's focused terminal.
+    /// The repository of the tab's focused terminal, or the folder an agent
+    /// asked for while the terminal stays where it was.
     private var pwd: String? {
-        controller?.focusedSurface?.pwd ?? controller?.surfaceTree.first?.pwd
+        let terminal = controller?.focusedSurface?.pwd ?? controller?.surfaceTree.first?.pwd
+        if let directory, directory.terminal == terminal { return directory.path }
+        return terminal
+    }
+
+    /// The folder `kinterm-ctl review` ran in, and the terminal's folder at
+    /// the time. An agent often works in a folder its shell never `cd`ed
+    /// to; this lasts until the terminal's own folder changes.
+    private var directory: (path: String, terminal: String?)?
+
+    /// Review the repository at `path` rather than the terminal's folder.
+    func review(in path: String) {
+        let terminal = controller?.focusedSurface?.pwd ?? controller?.surfaceTree.first?.pwd
+        directory = path == terminal ? nil : (path, terminal)
     }
 
     func refresh() {
