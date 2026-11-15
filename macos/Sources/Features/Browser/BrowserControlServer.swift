@@ -194,9 +194,9 @@ final class BrowserControlServer {
             BrowserEngine.recover()
             if let window = controller.gridWindow ?? controller.window,
                let page = center.gridPage(of: controller, in: window) {
-                center.closeGridTile(page)
+                center.closeGridTile(page, byUser: false)
             } else {
-                center.hidePanel(for: controller)
+                center.hidePanel(for: controller, byUser: false)
             }
 
         case "agent":

@@ -16,6 +16,9 @@ final class MarkdownViewerCenter: NSObject, NSMenuItemValidation {
         let model: MarkdownViewerModel
         let window: NSWindow
         let title: AnyCancellable
+        /// Tabs that opened this window by themselves, after their agent
+        /// wrote Markdown. Closing the window stops that for them.
+        var owners: [Weak<BaseTerminalController>] = []
     }
 
     private var entries: [ObjectIdentifier: Entry] = [:]
@@ -27,7 +30,10 @@ final class MarkdownViewerCenter: NSObject, NSMenuItemValidation {
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
         ) { [weak self] note in
             guard let window = note.object as? NSWindow else { return }
-            Task { @MainActor in self?.entries[ObjectIdentifier(window)] = nil }
+            Task { @MainActor in
+                guard let entry = self?.entries.removeValue(forKey: ObjectIdentifier(window)) else { return }
+                for owner in entry.owners { AgentAutoOpen.shared.dismissed(.markdown, for: owner.value) }
+            }
         }
     }
 
@@ -51,6 +57,36 @@ final class MarkdownViewerCenter: NSObject, NSMenuItemValidation {
             model.open(file)
             self.present(model)
         }
+    }
+
+    /// Show Markdown an agent in `controller`'s tab just wrote, without
+    /// taking the keyboard: in the viewer that has it or its folder, which
+    /// switches to it where it is, or in a new window in front.
+    @MainActor
+    func autoOpen(file: URL, for controller: BaseTerminalController) {
+        let file = file.standardizedFileURL
+        let ordered = NSApp.orderedWindows.compactMap { entries[ObjectIdentifier($0)] }
+        if let entry = ordered.first(where: { $0.model.current == file }) ?? ordered.first(where: { $0.model.contains(file) }) {
+            adopt(entry.window, by: controller)
+            if entry.model.current != file { entry.model.open(file) }
+            return
+        }
+        Task {
+            let folder = file.deletingLastPathComponent()
+            let root = await ReviewGit.root(of: folder.path).map { URL(fileURLWithPath: $0) } ?? folder
+            let model = MarkdownViewerModel(root: root)
+            model.open(file)
+            let window = self.present(model, activate: false)
+            self.adopt(window, by: controller)
+        }
+    }
+
+    @MainActor
+    private func adopt(_ window: NSWindow, by controller: BaseTerminalController) {
+        let id = ObjectIdentifier(window)
+        guard var entry = entries[id], !entry.owners.contains(where: { $0.value === controller }) else { return }
+        entry.owners.append(Weak(controller))
+        entries[id] = entry
     }
 
     /// A window on a folder, opening its README (or the like) first.
@@ -110,7 +146,8 @@ final class MarkdownViewerCenter: NSObject, NSMenuItemValidation {
     }
 
     @MainActor
-    private func present(_ model: MarkdownViewerModel) {
+    @discardableResult
+    private func present(_ model: MarkdownViewerModel, activate: Bool = true) -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 780),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -146,7 +183,13 @@ final class MarkdownViewerCenter: NSObject, NSMenuItemValidation {
             }
         }
         entries[ObjectIdentifier(window)] = Entry(model: model, window: window, title: title)
-        window.makeKeyAndOrderFront(nil)
+        if activate {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            // In front, but the keyboard stays in the terminal.
+            window.orderFront(nil)
+        }
+        return window
     }
 
     @MainActor
@@ -210,6 +253,7 @@ final class MarkdownViewerCenter: NSObject, NSMenuItemValidation {
     @MainActor
     @objc private func openFromMenu(_ sender: Any?) {
         let controller = frontController
+        AgentAutoOpen.shared.reopened(.markdown, for: controller)
         if let pwd = controller?.focusedSurface?.pwd ?? controller?.surfaceTree.first?.pwd {
             open(folder: URL(fileURLWithPath: pwd))
         } else {

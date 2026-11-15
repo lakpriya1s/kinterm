@@ -83,8 +83,50 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
 
     // MARK: Showing and hiding
 
+    /// ⌘⇧R. Closing the review this way stops it opening by itself for the
+    /// tab's agent session; opening it starts that again.
     @MainActor
     func toggle(for controller: BaseTerminalController) {
+        toggleShowing(for: controller)
+        if isShown(for: controller) {
+            AgentAutoOpen.shared.reopened(.review, for: controller)
+        } else {
+            AgentAutoOpen.shared.dismissed(.review, for: controller)
+        }
+    }
+
+    /// Whether the tab's review is anywhere: beside it, in a window, or a tile.
+    @MainActor
+    func isShown(for controller: BaseTerminalController) -> Bool {
+        if isPanelShown(for: controller) || isWindowShown(for: controller) { return true }
+        guard let window = controller.gridWindow ?? controller.window else { return false }
+        return hasGridReview(of: controller, in: window)
+    }
+
+    /// Show the review after an agent's turn changed files, on its "Last
+    /// Turn" changes, without taking the keyboard. Left alone when it's
+    /// already showing.
+    @MainActor
+    func autoShow(for controller: BaseTerminalController) {
+        guard !isShown(for: controller) else {
+            existingModel(for: controller)?.refresh()
+            return
+        }
+        let model = model(for: controller)
+        model.tab = .changes
+        model.scope = .lastTurn
+        if inGrid(controller), let window = controller.gridWindow ?? controller.window {
+            openGridReview(of: controller, in: window)
+        } else if preferred == .window {
+            showWindow(for: controller, activate: false)
+        } else {
+            showPanel(for: controller)
+        }
+        model.refresh()
+    }
+
+    @MainActor
+    private func toggleShowing(for controller: BaseTerminalController) {
         if inGrid(controller), let window = controller.gridWindow ?? controller.window {
             if hasGridReview(of: controller, in: window) {
                 closeGridReview(of: controller, in: window)
@@ -120,7 +162,7 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
     }
 
     @MainActor
-    func showWindow(for controller: BaseTerminalController) {
+    func showWindow(for controller: BaseTerminalController, activate: Bool = true) {
         let id = ObjectIdentifier(controller)
         panels.remove(id)
         preferred = .window
@@ -145,7 +187,10 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
                     self.showPanel(for: controller)
                     controller.window?.makeKeyAndOrderFront(nil)
                 },
-                close: { [weak window] in window?.close() }))
+                close: { [weak window, weak controller] in
+                    AgentAutoOpen.shared.dismissed(.review, for: controller)
+                    window?.close()
+                }))
             window.setFrameAutosaveName("KinTermReviewWindow")
             if !window.setFrameUsingName("KinTermReviewWindow") {
                 if let anchor = controller.window { window.setFrameTopLeftPoint(
@@ -156,7 +201,8 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
         }()
 
         window.title = "Review · \(model.tabTitle)"
-        window.makeKeyAndOrderFront(nil)
+        // Brought in front without the keyboard, which stays in the terminal.
+        if activate { window.makeKeyAndOrderFront(nil) } else { window.orderFront(nil) }
         model.refresh()
     }
 
@@ -227,6 +273,7 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
     /// back to the tab.
     @MainActor
     func closeGridReview(of controller: BaseTerminalController, in window: NSWindow) {
+        AgentAutoOpen.shared.dismissed(.review, for: controller)
         setGridReviews(window) { $0.removeAll { $0.value === controller } }
         TerminalGridModel.shared.focus(controller)
     }
@@ -251,6 +298,15 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
     }
 
     @MainActor
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        // Closed with its close button or ⌘W: the user's choice.
+        if let id = windows.first(where: { $0.value === sender })?.key {
+            AgentAutoOpen.shared.dismissed(.review, for: models[id]?.controller)
+        }
+        return true
+    }
+
+    @MainActor
     func windowDidBecomeKey(_ notification: Notification) {
         // Coming back to the window after the agent did more: look again.
         guard let window = notification.object as? NSWindow,
@@ -265,6 +321,7 @@ final class ReviewCenter: NSObject, ObservableObject, NSMenuItemValidation, NSWi
         windows.removeValue(forKey: id)?.close()
         models[id] = nil
         ReviewSnapshots.shared.forget(controller)
+        AgentAutoOpen.shared.forget(controller)
         // Its review tile goes too.
         for (key, list) in gridReviews where list.contains(where: { $0.value === controller || $0.value == nil }) {
             let rest = list.filter { $0.value != nil && $0.value !== controller }
@@ -353,6 +410,7 @@ struct ReviewPanelHost<Content: View>: View {
                         },
                         close: { [weak controller] in
                             guard let controller else { return }
+                            AgentAutoOpen.shared.dismissed(.review, for: controller)
                             ReviewCenter.shared.hidePanel(for: controller)
                         })
                     .frame(width: PanelResizeHandle.fit(center.panelWidth, in: geometry.size.width))

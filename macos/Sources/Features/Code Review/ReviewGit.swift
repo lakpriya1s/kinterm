@@ -261,6 +261,28 @@ enum ReviewGit {
         return ReviewSnapshot(commit: commit, untracked: Set(untracked), date: Date())
     }
 
+    /// The paths that changed since `snapshot` and are still there:
+    /// tracked files that differ from it, and untracked files that are new
+    /// or were written after it. Cheaper than `changes`, for deciding what
+    /// to show after an agent's turn.
+    static func changedPaths(in root: String, since snapshot: ReviewSnapshot) async -> [String] {
+        var paths: [String] = []
+        if let output = try? await check(
+            ["diff", "--no-ext-diff", "--name-only", "-z", "--diff-filter=d", snapshot.commit, "--"], in: root) {
+            paths = output.text.split(separator: "\0").map(String.init)
+        }
+        let untracked = (try? await untracked(in: root)) ?? []
+        for path in untracked where !path.hasSuffix("/") {
+            if snapshot.untracked.contains(path) {
+                let url = URL(fileURLWithPath: root).appendingPathComponent(path)
+                let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                guard (modified ?? .distantPast) > snapshot.date else { continue }
+            }
+            paths.append(path)
+        }
+        return paths
+    }
+
     /// The working tree's changes against `base`, untracked files included.
     /// With a snapshot, untracked files that were already there and haven't
     /// changed since are left out.
