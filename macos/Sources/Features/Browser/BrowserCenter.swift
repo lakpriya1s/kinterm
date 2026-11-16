@@ -652,7 +652,8 @@ final class BrowserCenter: NSObject, ObservableObject, NSMenuItemValidation {
     }
 }
 
-/// A tab's terminal with its side panels: the browser, then the review.
+/// A tab's terminal with its side panels: the browser, the Markdown Viewer,
+/// then the review.
 struct TerminalSidePanels<Content: View>: View {
     weak var controller: BaseTerminalController?
     @ViewBuilder let content: () -> Content
@@ -664,26 +665,28 @@ struct TerminalSidePanels<Content: View>: View {
         // terminals.
         HStack(spacing: 0) {
             ReviewPanelHost(controller: controller) {
-                GeometryReader { geometry in
-                    HStack(spacing: 0) {
-                        content()
-                            .frame(minWidth: 0, maxWidth: .infinity)
-                        if let controller, let page = browsers.panelPage(for: controller) {
-                            PanelResizeHandle(width: $browsers.panelWidth, defaultWidth: 560)
-                                .zIndex(1)
-                            BrowserView(
-                                page: page,
-                                close: { [weak controller] in
-                                    guard let controller else { return }
-                                    Task { @MainActor in BrowserCenter.shared.hidePanel(for: controller) }
-                                },
-                                popOut: { [weak page] in
-                                    guard let page else { return }
-                                    Task { @MainActor in BrowserCenter.shared.popOut(page) }
-                                })
-                            .frame(width: PanelResizeHandle.fit(browsers.panelWidth, in: geometry.size.width))
-                            .clipped()
-                            .id(ObjectIdentifier(page))
+                MarkdownPanelHost(controller: controller) {
+                    GeometryReader { geometry in
+                        HStack(spacing: 0) {
+                            content()
+                                .frame(minWidth: 0, maxWidth: .infinity)
+                            if let controller, let page = browsers.panelPage(for: controller) {
+                                PanelResizeHandle(width: $browsers.panelWidth, defaultWidth: 560)
+                                    .zIndex(1)
+                                BrowserView(
+                                    page: page,
+                                    close: { [weak controller] in
+                                        guard let controller else { return }
+                                        Task { @MainActor in BrowserCenter.shared.hidePanel(for: controller) }
+                                    },
+                                    popOut: { [weak page] in
+                                        guard let page else { return }
+                                        Task { @MainActor in BrowserCenter.shared.popOut(page) }
+                                    })
+                                .frame(width: PanelResizeHandle.fit(browsers.panelWidth, in: geometry.size.width))
+                                .clipped()
+                                .id(ObjectIdentifier(page))
+                            }
                         }
                     }
                 }

@@ -2,10 +2,18 @@ import AppKit
 import SwiftUI
 import WebKit
 
-/// A Markdown Viewer window: the folder's Markdown files beside the open one.
+/// A Markdown Viewer, beside a tab's terminal or in a window of its own: the
+/// folder's Markdown files beside the open one.
 struct MarkdownViewerView: View {
+    enum Placement { case panel, window }
+
     @ObservedObject var model: MarkdownViewerModel
+    var placement: Placement = .window
     let chooseFolder: () -> Void
+    /// Panel: into a window of its own. Window: back beside its terminal,
+    /// when it has one to go back to.
+    var switchPlacement: (() -> Void)?
+    var close: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -57,6 +65,17 @@ struct MarkdownViewerView: View {
             BrowserButton(symbol: "folder", help: "Show in Finder", enabled: model.current != nil) { model.revealInFinder() }
             BrowserButton(symbol: "arrow.up.forward.app", help: "Open in Default App", enabled: model.current != nil) {
                 model.openInEditor()
+            }
+            if let switchPlacement {
+                switch placement {
+                case .panel:
+                    BrowserButton(symbol: "macwindow.on.rectangle", help: "Open in Its Own Window", action: switchPlacement)
+                case .window:
+                    BrowserButton(symbol: "sidebar.trailing", help: "Put Back Beside the Terminal", action: switchPlacement)
+                }
+            }
+            if let close {
+                BrowserButton(symbol: "xmark.circle", help: "Close Markdown Viewer (⌘⇧M)", action: close)
             }
         }
         .padding(.horizontal, 6)

@@ -203,7 +203,7 @@ const tools = [
   {
     name: "markdown",
     description:
-      "Show a Markdown file in KinTerm's Markdown Viewer, a window that renders it and reloads as the file " +
+      "Show a Markdown file in KinTerm's Markdown Viewer, beside the user's terminal (a tile in Grid View), which renders it and reloads as the file " +
       "changes. Use it to show the user a plan, notes or docs you wrote. Give a folder instead to open the " +
       "viewer on its Markdown files.",
     inputSchema: {

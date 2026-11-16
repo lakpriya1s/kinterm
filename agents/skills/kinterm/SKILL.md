@@ -92,11 +92,11 @@ arrive as a list of `file:line` notes; address each one.
 When you write a plan, a design note, a report or docs the user should
 read, show it rendered in KinTerm's Markdown Viewer instead of pasting it
 into the chat: `kinterm-ctl markdown docs/plan.md` (`markdown`, with
-`path`). It opens in a window of its own with the folder's other Markdown
-files beside it, and reloads as you edit the file, so open it once and keep
-writing. Give a folder (`kinterm-ctl markdown docs`) to open the viewer on
-its Markdown files. The user can also open it with ⌘⇧M, or by ⌘-clicking a
-`.md` path you print.
+`path`). It opens beside your terminal (a tile in Grid View) with the
+folder's other Markdown files listed, and reloads as you edit the file, so
+open it once and keep writing. Give a folder (`kinterm-ctl markdown docs`)
+to open the viewer on its Markdown files. The user can also open it with
+⌘⇧M, or by ⌘-clicking a `.md` path you print.
 
 ## Split big work across agents
 
