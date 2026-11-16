@@ -20,12 +20,18 @@ struct TerminalGridView: View {
     /// The grid's browser tiles (⌘⇧B), one per tab. See `BrowserCenter`.
     @ObservedObject private var browsers = BrowserCenter.shared
 
+    /// The grid's Markdown Viewer tiles (⌘⇧M), one per tab. See
+    /// `MarkdownViewerCenter`.
+    @ObservedObject private var markdown = MarkdownViewerCenter.shared
+
     private static let gap: CGFloat = 6
 
-    /// A tile: a tab, a tab's review, a browser, or a browser's DevTools.
+    /// A tile: a tab, a tab's review, a tab's Markdown Viewer, a browser,
+    /// or a browser's DevTools.
     private enum Item: Hashable {
         case tab(BaseTerminalController)
         case review(BaseTerminalController)
+        case markdown(BaseTerminalController)
         case browser(BrowserPage)
         case devTools(BrowserPage)
 
@@ -35,6 +41,7 @@ struct TerminalGridView: View {
             case .review(let controller): return (1, ObjectIdentifier(controller))
             case .browser(let page): return (2, ObjectIdentifier(page))
             case .devTools(let page): return (3, ObjectIdentifier(page))
+            case .markdown(let controller): return (4, ObjectIdentifier(controller))
             }
         }
 
@@ -49,8 +56,10 @@ struct TerminalGridView: View {
         let window = controllers.first?.window
         let reviewed = review.gridReviewControllers(for: window)
         let pages = browsers.gridPages(for: window)
+        let readers = markdown.gridTileControllers(for: window)
         let items = controllers.map(Item.tab)
             + reviewed.map(Item.review)
+            + readers.map(Item.markdown)
             + pages.flatMap { page in [Item.browser(page)] + (page.devTools == .docked ? [Item.devTools(page)] : []) }
         let count = items.count
         // As square as possible, wider than tall: 2 → 2×1, 3–4 → 2×2,
@@ -75,6 +84,10 @@ struct TerminalGridView: View {
                                     controller: controller,
                                     tab: tab(for: controller),
                                     window: window)
+                            }
+                        case .markdown(let controller):
+                            if let model = markdown.dockedModel(for: controller) {
+                                MarkdownGridTile(model: model, controller: controller, tab: tab(for: controller))
                             }
                         case .browser(let page):
                             BrowserGridTile(page: page, tab: browsers.owner(of: page).flatMap(tab(for:)))
@@ -207,6 +220,67 @@ private struct ReviewGridTile: View {
                 .allowsHitTesting(false))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Review")
+    }
+}
+
+/// A Markdown Viewer tile (⌘⇧M), opened for a tab. See
+/// `MarkdownViewerCenter`.
+private struct MarkdownGridTile: View {
+    @ObservedObject var model: MarkdownViewerModel
+    let controller: BaseTerminalController
+    let tab: AgentTab?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "doc.richtext")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(AgentTabBarColors.cardTitle)
+                Text("Markdown")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(AgentTabBarColors.cardTitle)
+                if let color = tab?.color {
+                    Circle().fill(color).frame(width: 7, height: 7)
+                }
+                Text(model.title)
+                    .font(.system(size: 11))
+                    .foregroundColor(AgentTabBarColors.cardMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 4)
+
+                Text("⌘⇧M")
+                    .font(.system(size: 10))
+                    .foregroundColor(AgentTabBarColors.cardMuted)
+                TerminalGridHeaderButton(symbol: "macwindow.on.rectangle", help: "Open Markdown Viewer in Its Own Window") {
+                    MarkdownViewerCenter.shared.popOut(for: controller)
+                }
+                TerminalGridHeaderButton(symbol: "xmark", help: "Close Markdown Viewer (⌘⇧M)") {
+                    MarkdownViewerCenter.shared.close(for: controller)
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(AgentTabBarColors.card)
+            .help("Markdown for \(tab?.title ?? model.title)")
+
+            MarkdownViewerView(
+                model: model,
+                placement: .panel,
+                chooseFolder: { [weak model, weak controller] in
+                    guard let model else { return }
+                    MarkdownViewerCenter.shared.chooseFolder(
+                        for: model, in: controller?.gridWindow ?? controller?.window)
+                })
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(AgentTabBarColors.border, lineWidth: 1)
+                .allowsHitTesting(false))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Markdown Viewer")
     }
 }
 

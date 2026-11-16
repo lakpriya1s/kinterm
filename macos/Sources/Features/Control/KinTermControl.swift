@@ -117,8 +117,8 @@ enum KinTermControl {
                 return fail("Say which Markdown file or folder to show.")
             }
             switch MarkdownViewerCenter.target(path) {
-            case .file(let url): MarkdownViewerCenter.shared.open(file: url)
-            case .folder(let url): MarkdownViewerCenter.shared.open(folder: url)
+            case .file(let url): MarkdownViewerCenter.shared.open(file: url, for: controller)
+            case .folder(let url): MarkdownViewerCenter.shared.open(folder: url, for: controller)
             case .missing: return fail("There's nothing at \(path).")
             case .notMarkdown: return fail("\(path) isn't a Markdown file (.md, .markdown, .mdx).")
             }
