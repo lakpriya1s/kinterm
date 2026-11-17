@@ -68,7 +68,7 @@ A tab with splits shows its most urgent agent: waiting, then error, done, workin
 | ▦ | **Grid View.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>E</kbd> shows every tab of a window as a live tile, so all your agents are on screen at once. When one needs you, the keyboard moves to it, once you've sent what you were typing or saying. [More below](#work-alongside-your-agents) |
 | ✅ | **Review Changes.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd> shows what an agent changed as GitHub-style diffs, in a folder tree, across every repo of a VS Code workspace. [More below](#work-alongside-your-agents) |
 | 🌐 | **A browser agents can use.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>B</kbd> opens your dev server beside the terminal, with Chrome's DevTools. [More below](#work-alongside-your-agents) |
-| 📝 | **Markdown Viewer.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>M</kbd> opens a viewer beside the terminal (a tile in Grid View, or pop it out into its own window) that renders the repo's Markdown files (plans, notes, `AGENTS.md`) with the file list beside them, and reloads as an agent edits them. <kbd>⌘</kbd>-click a `.md` path in a terminal to open it there, and agents open what they wrote with `kinterm-ctl markdown` |
+| 📝 | **Markdown Viewer.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>M</kbd> opens a viewer beside the terminal (a tile in Grid View, or pop it out into its own window) that renders the repo's Markdown files (plans, notes, `AGENTS.md`), with a file list you can show beside them, and reloads as an agent edits them. When an agent changes a file, what it changed is highlighted and the page scrolls there; step through the changes from the toolbar. <kbd>⌘</kbd>-click a `.md` path in a terminal to open it there, and agents open what they wrote with `kinterm-ctl markdown` |
 | 🔘 | **Buttons for the tools.** Grid View, Review Changes and the browser sit at the end of the tab bar, lit while open, with a count of changed files on Review |
 | ♻️ | **Picks up where you left off.** After you quit, restart or crash, windows come back as they were: agent tabs resume their Claude Code or Codex session, other terminals show their old output. [More below](#pick-up-where-you-left-off) |
 | 📋 | **Copy agent text whole.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>C</kbd> copies text an agent broke into lines (paragraphs, commands, links) as one piece, and <kbd>⌘</kbd>-click opens links split across lines. [More below](#copy-agent-text-whole) |
@@ -128,11 +128,13 @@ kinterm-browser mcp            # the MCP server, for any agent
 
 **Agents can drive KinTerm itself**, with `kinterm-ctl` or the `kinterm` MCP server that
 Connect Agents adds. An agent can run a dev server or tests in a small pane under it and read
-the output, notify you when it's done, open the review at the files to look at first, and
+the output (right-click a pane › Hide Pane to put it away while it keeps running, and
+right-click the terminal to show it again), notify you when it's done, open the review at the files to look at first, and
 show you a plan or doc it wrote in the Markdown Viewer. Even without asking, when an
-agent's turn ends KinTerm opens the Markdown it wrote, the review of the files it changed,
-and the dev server it started; close one and it stays closed for that agent's session
-(View › Open Automatically turns each off).
+agent's turn ends KinTerm opens the Markdown it wrote, with its changes highlighted, the
+review of the files it changed, and the dev server it started, all in that agent's own
+tab, even when agents in other tabs work in the same repository. Close one and it stays
+closed for that agent's session (View › Open Automatically turns each off).
 It can also split a big job across other agents, each in a tab of its own (optionally in
 its own git worktree), wait for them, read what they did, answer their questions, and
 close them. You can watch and type into every one of those tabs.
