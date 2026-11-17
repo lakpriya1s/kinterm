@@ -136,15 +136,21 @@ final class AgentAutoOpen: NSObject {
 
         Task { [weak controller] in
             // What the turn changed, in every repository the review covers.
+            // Only what this tab's agent wrote: another tab's agent working
+            // in the same repository changes it too, and that's shown in
+            // its own tab. A file both could have written isn't opened.
             var markdown: [URL] = []
             var code = false
             if wantsMarkdown || wantsReview || browserPage != nil, let pwd,
                let workspace = await ReviewWorkspace.discover(from: pwd) {
                 for repo in workspace.repos {
                     guard let snapshot = ReviewSnapshots.shared.turns(for: id, root: repo.root)?.last else { continue }
+                    let attribution = ReviewSnapshots.shared.attribution(for: id, root: repo.root)
                     for path in await ReviewGit.changedPaths(in: repo.root, since: snapshot) {
+                        let url = URL(fileURLWithPath: repo.root).appendingPathComponent(path)
+                        guard attribution.owner(of: url) == .own else { continue }
                         if MarkdownRenderer.isMarkdown(path) {
-                            markdown.append(URL(fileURLWithPath: repo.root).appendingPathComponent(path))
+                            markdown.append(url)
                         } else {
                             code = true
                         }

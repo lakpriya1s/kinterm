@@ -1759,6 +1759,8 @@ extension BaseTerminalController {
                 // A prompt starting: remember the tree for the review's
                 // "Last Turn" and "This Session".
                 ReviewSnapshots.shared.statusChanged(self, from: programStatus?.state, to: status?.state)
+                // The files its agent edits, to tell them from other tabs'.
+                ReviewSnapshots.shared.noteMessage(ObjectIdentifier(self), status?.msg)
                 let old = programStatus?.state
                 programStatus = status
                 // At the end of a turn, show what the agent made.
