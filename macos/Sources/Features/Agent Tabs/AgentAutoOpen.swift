@@ -140,6 +140,8 @@ final class AgentAutoOpen: NSObject {
             // in the same repository changes it too, and that's shown in
             // its own tab. A file both could have written isn't opened.
             var markdown: [URL] = []
+            /// Where each Markdown file is, to find its text before the turn.
+            var origins: [URL: (path: String, root: String, snapshot: ReviewSnapshot)] = [:]
             var code = false
             if wantsMarkdown || wantsReview || browserPage != nil, let pwd,
                let workspace = await ReviewWorkspace.discover(from: pwd) {
@@ -151,6 +153,7 @@ final class AgentAutoOpen: NSObject {
                         guard attribution.owner(of: url) == .own else { continue }
                         if MarkdownRenderer.isMarkdown(path) {
                             markdown.append(url)
+                            origins[url] = (path, repo.root, snapshot)
                         } else {
                             code = true
                         }
@@ -177,7 +180,12 @@ final class AgentAutoOpen: NSObject {
 
             guard let controller else { return }
             if wantsMarkdown, let file = Self.newest(markdown) {
-                MarkdownViewerCenter.shared.autoOpen(file: file, for: controller)
+                // What it said before the turn, to show what the turn changed.
+                var before: String?
+                if let origin = origins[file] {
+                    before = await ReviewGit.text(of: origin.path, at: origin.snapshot, in: origin.root)
+                }
+                MarkdownViewerCenter.shared.autoOpen(file: file, for: controller, before: before)
             }
             if wantsReview, code {
                 ReviewCenter.shared.autoShow(for: controller)

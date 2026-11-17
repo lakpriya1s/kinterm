@@ -56,6 +56,10 @@ struct MarkdownViewerView: View {
                 .padding(.horizontal, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            if model.changeCount > 0 || model.isNewFile {
+                changesControl
+            }
+
             Picker("", selection: $model.mode) {
                 Text("Rendered").tag(MarkdownViewerModel.Mode.rendered)
                 Text("Source").tag(MarkdownViewerModel.Mode.source)
@@ -87,6 +91,32 @@ struct MarkdownViewerView: View {
         .padding(.horizontal, 6)
         .frame(height: 34)
         .background(ReviewColors.surface)
+    }
+
+    /// What the agent changed: how many, stepping through them, and done.
+    private var changesControl: some View {
+        HStack(spacing: 0) {
+            if model.isNewFile {
+                Text("New file")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(ReviewColors.addedText)
+                    .padding(.horizontal, 8)
+                    .help("The agent wrote this file in its last turn")
+            } else {
+                BrowserButton(symbol: "chevron.up", help: "Previous Change") { model.previousChange() }
+                Text("\(model.changeIndex + 1) of \(model.changeCount) change\(model.changeCount == 1 ? "" : "s")")
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundColor(ReviewColors.addedText)
+                    .fixedSize()
+                    .padding(.horizontal, 2)
+                    .help("What the agent changed in its last turn")
+                BrowserButton(symbol: "chevron.down", help: "Next Change") { model.nextChange() }
+            }
+            BrowserButton(symbol: "checkmark", help: "Done: Stop Marking the Changes") { model.dismissChanges() }
+        }
+        .padding(.horizontal, 2)
+        .background(RoundedRectangle(cornerRadius: 6).fill(ReviewColors.addedText.opacity(0.12)))
+        .padding(.trailing, 4)
     }
 
     @ViewBuilder
@@ -291,7 +321,7 @@ struct MarkdownWebView: NSViewRepresentable {
             webView.evaluateJavaScript("""
                 (function() {
                   var el = document.getElementById('\(id)') || document.getElementsByName('\(id)')[0];
-                  if (el) el.scrollIntoView();
+                  if (el) el.scrollIntoView(el.id.indexOf('kt-change-') === 0 ? { block: 'center' } : undefined);
                 })()
                 """)
         }

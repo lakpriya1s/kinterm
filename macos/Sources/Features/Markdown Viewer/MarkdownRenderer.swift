@@ -17,9 +17,20 @@ enum MarkdownRenderer {
     /// A whole page: `text` rendered, styled like the review panel. Local
     /// images are resolved against `file` and embedded.
     static func page(_ text: String, file: URL) -> String {
+        page(text, file: file, changes: nil).html
+    }
+
+    /// A whole page with the blocks `changes` touches marked
+    /// (`kt-change-0`, `kt-change-1`... in order), and how many there are.
+    static func page(_ text: String, file: URL, changes: MarkdownLineChanges?) -> (html: String, changes: Int) {
         var renderer = Renderer(directory: file.deletingLastPathComponent())
+        renderer.changes = changes
         let body = renderer.document(text)
-        return """
+        return (wrap(body), renderer.marks)
+    }
+
+    private static func wrap(_ body: String) -> String {
+        """
         <!doctype html>
         <html><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -30,13 +41,35 @@ enum MarkdownRenderer {
 
     /// The Markdown itself, with line numbers.
     static func sourcePage(_ text: String) -> String {
+        sourcePage(text, changes: nil).html
+    }
+
+    /// The Markdown with changed lines marked, each run of them (and each
+    /// place text was removed) one change, numbered as in `page`.
+    static func sourcePage(_ text: String, changes: MarkdownLineChanges?) -> (html: String, changes: Int) {
         var rows = ""
         var n = 0
+        var marks = 0
+        var inRun = false
         text.enumerateLines { line, _ in
+            var attrs = ""
+            if let changes {
+                if changes.changed.contains(n) {
+                    attrs = " class=\"kt-line\""
+                    if !inRun { attrs += " id=\"kt-change-\(marks)\""; marks += 1 }
+                    inRun = true
+                } else {
+                    inRun = false
+                    if changes.removed.contains(n) {
+                        attrs = " class=\"kt-line-after-removed\" id=\"kt-change-\(marks)\""
+                        marks += 1
+                    }
+                }
+            }
             n += 1
-            rows += "<tr><td class=\"ln\">\(n)</td><td>\(escape(line))</td></tr>\n"
+            rows += "<tr\(attrs)><td class=\"ln\">\(n)</td><td>\(escape(line))</td></tr>\n"
         }
-        return """
+        let html = """
         <!doctype html>
         <html><head><meta charset="utf-8">
         <style>\(css)
@@ -46,6 +79,7 @@ enum MarkdownRenderer {
         </style></head>
         <body><article style="max-width: none"><table class="source">\(rows)</table></article></body></html>
         """
+        return (html, marks)
     }
 
     /// GitHub's heading anchors: lowercased, punctuation dropped, spaces
@@ -127,6 +161,21 @@ enum MarkdownRenderer {
         kbd { padding: 0.15em 0.4em; font: 11px ui-monospace, Menlo, monospace; border-radius: 4px;
               border: 1px solid \(hex(ReviewColors.border)); background: \(hex(ReviewColors.card)); }
         mark { background: rgba(210, 153, 34, 0.4); color: inherit; }
+        .kt-change { position: relative; background: rgba(46, 160, 67, 0.12); border-radius: 4px;
+                     box-shadow: 0 0 0 6px rgba(46, 160, 67, 0.12); }
+        .kt-change::before { content: ""; position: absolute; left: -14px; top: -6px; bottom: -6px; width: 3px;
+                             border-radius: 2px; background: \(hex(ReviewColors.addedText)); }
+        li.kt-change::before { left: -2.4em; }
+        div.kt-change { margin: 0 0 calc(1em + 6px); }
+        div.kt-change > :last-child { margin-bottom: 0; }
+        .kt-removed { position: relative; height: 0; margin: 0 0 1em;
+                      border-top: 2px dashed \(hex(ReviewColors.removedText)); opacity: 0.8; }
+        .kt-removed::after { content: "removed"; position: absolute; right: 0; top: -9px; padding: 0 6px;
+                             font-size: 10px; color: \(hex(ReviewColors.removedText));
+                             background: \(hex(ReviewColors.background)); }
+        tr.kt-line td { background: rgba(46, 160, 67, 0.16) !important; }
+        tr.kt-line td.ln { color: \(hex(ReviewColors.addedText)); }
+        tr.kt-line-after-removed td { box-shadow: inset 0 2px 0 \(hex(ReviewColors.removedText)); }
         """
     }
 }
@@ -139,6 +188,12 @@ private struct Renderer {
     private var references: [String: (url: String, title: String?)] = [:]
     /// Heading anchors used so far, to number repeats like GitHub.
     private var slugs: [String: Int] = [:]
+    /// Lines changed since a version to compare with, to mark.
+    var changes: MarkdownLineChanges?
+    /// How many changes were marked so far.
+    private(set) var marks = 0
+    /// The block just rendered was a list that marked its own items.
+    private var listMarked = false
 
     init(directory: URL) {
         self.directory = directory
@@ -158,10 +213,11 @@ private struct Renderer {
            }) {
             let front = lines[1..<end].joined(separator: "\n")
             html += "<pre class=\"front-matter\"><code>\(MarkdownRenderer.escape(front))</code></pre>\n"
-            lines.removeSubrange(0...end)
+            // Blanked rather than removed, so lines keep their numbers.
+            for k in 0...end { lines[k] = "" }
         }
         lines = collectReferences(lines)
-        return html + blocks(lines[...], tight: false)
+        return html + blocks(lines[...], tight: false, top: true)
     }
 
     /// Takes reference definitions out of the text, outside code fences.
@@ -182,6 +238,7 @@ private struct Renderer {
             if let def = Self.reference(line) {
                 let key = def.label.lowercased()
                 if references[key] == nil { references[key] = (def.url, def.title) }
+                kept.append("")
                 continue
             }
             kept.append(line)
@@ -215,122 +272,171 @@ private struct Renderer {
 
     // MARK: Block structure
 
-    private mutating func blocks(_ lines: ArraySlice<String>, tight: Bool) -> String {
+    private mutating func blocks(_ lines: ArraySlice<String>, tight: Bool, top: Bool = false) -> String {
         var html = ""
         var i = lines.startIndex
         let end = lines.endIndex
+        // Where the last block ended, for text removed between blocks.
+        var previousEnd = i
         while i < end {
-            let line = lines[i]
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            if trimmed.isEmpty {
-                i += 1
+            let start = i
+            let out = block(lines, at: &i, tight: tight, top: top)
+            guard top, changes != nil, !out.isEmpty else {
+                html += out
                 continue
             }
-
-            // Fenced code.
-            if let open = Self.fenceOpen(line) {
-                var body: [String] = []
-                i += 1
-                while i < end, !Self.closesFence(lines[i], open.marker) {
-                    body.append(Self.dropIndent(lines[i], open.indent))
-                    i += 1
-                }
-                if i < end { i += 1 }
-                html += code(body, language: open.info)
-                continue
-            }
-
-            // Indented code.
-            if Self.indent(line) >= 4 {
-                var body: [String] = []
-                while i < end, Self.indent(lines[i]) >= 4 || Self.isBlank(lines[i]) {
-                    body.append(Self.dropIndent(lines[i], 4))
-                    i += 1
-                }
-                while body.last.map(Self.isBlank) == true { body.removeLast() }
-                html += code(body, language: "")
-                continue
-            }
-
-            if let heading = Self.atxHeading(line) {
-                html += self.heading(heading.level, heading.text)
-                i += 1
-                continue
-            }
-
-            if Self.isRule(line) {
-                html += "<hr>\n"
-                i += 1
-                continue
-            }
-
-            if Self.isQuote(line) {
-                var inner: [String] = []
-                while i < end {
-                    let l = lines[i]
-                    if Self.isQuote(l) {
-                        inner.append(Self.stripQuote(l))
-                    } else if !Self.isBlank(l), let last = inner.last, !Self.isBlank(last),
-                              !Self.startsBlock(l) {
-                        // A lazy continuation of the quoted paragraph.
-                        inner.append(l)
-                    } else {
-                        break
-                    }
-                    i += 1
-                }
-                html += "<blockquote>\n\(blocks(inner[...], tight: false))</blockquote>\n"
-                continue
-            }
-
-            if let marker = Self.listMarker(line) {
-                i = list(lines, from: i, first: marker, into: &html)
-                continue
-            }
-
-            if i + 1 < end, line.contains("|"), let aligns = Self.tableDelimiter(lines[i + 1]) {
-                let header = Self.cells(line)
-                if header.count == aligns.count {
-                    i = table(lines, from: i, header: header, aligns: aligns, into: &html)
-                    continue
-                }
-            }
-
-            if Self.isHTMLBlock(line) {
-                var raw: [String] = []
-                while i < end, !Self.isBlank(lines[i]) {
-                    raw.append(lines[i])
-                    i += 1
-                }
-                html += embedSources(raw.joined(separator: "\n")) + "\n"
-                continue
-            }
-
-            // A paragraph, or a setext heading.
-            var para: [String] = [trimmed]
-            i += 1
-            var setext = 0
-            while i < end {
-                let l = lines[i]
-                if Self.isBlank(l) { break }
-                let t = l.trimmingCharacters(in: .whitespaces)
-                if Self.indent(l) < 4, !t.isEmpty, t.allSatisfy({ $0 == "=" }) { setext = 1; i += 1; break }
-                if Self.indent(l) < 4, !t.isEmpty, t.allSatisfy({ $0 == "-" }) { setext = 2; i += 1; break }
-                if Self.startsBlock(l) { break }
-                para.append(Self.indent(l) >= 4 ? t : String(l.drop(while: { $0 == " " })))
-                i += 1
-            }
-            let text = para.joined(separator: "\n")
-            if setext > 0 {
-                html += heading(setext, text)
-            } else if tight {
-                html += inline(text) + "\n"
-            } else {
-                html += "<p>\(inline(text))</p>\n"
-            }
+            html += marked(out, lines: start..<i, after: previousEnd)
+            previousEnd = i
+        }
+        if top, let changes, changes.removed.contains(where: { $0 >= previousEnd }) {
+            html += removedMarker()
         }
         return html
+    }
+
+    /// One block starting at `i`, moving `i` past it. Blank lines give "".
+    private mutating func block(_ lines: ArraySlice<String>, at i: inout Int, tight: Bool, top: Bool) -> String {
+        let end = lines.endIndex
+        let line = lines[i]
+        var html = ""
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+        if trimmed.isEmpty {
+            i += 1
+            return html
+        }
+
+        // Fenced code.
+        if let open = Self.fenceOpen(line) {
+            var body: [String] = []
+            i += 1
+            while i < end, !Self.closesFence(lines[i], open.marker) {
+                body.append(Self.dropIndent(lines[i], open.indent))
+                i += 1
+            }
+            if i < end { i += 1 }
+            html += code(body, language: open.info)
+            return html
+        }
+
+        // Indented code.
+        if Self.indent(line) >= 4 {
+            var body: [String] = []
+            while i < end, Self.indent(lines[i]) >= 4 || Self.isBlank(lines[i]) {
+                body.append(Self.dropIndent(lines[i], 4))
+                i += 1
+            }
+            while body.last.map(Self.isBlank) == true { body.removeLast() }
+            html += code(body, language: "")
+            return html
+        }
+
+        if let heading = Self.atxHeading(line) {
+            html += self.heading(heading.level, heading.text)
+            i += 1
+            return html
+        }
+
+        if Self.isRule(line) {
+            html += "<hr>\n"
+            i += 1
+            return html
+        }
+
+        if Self.isQuote(line) {
+            var inner: [String] = []
+            while i < end {
+                let l = lines[i]
+                if Self.isQuote(l) {
+                    inner.append(Self.stripQuote(l))
+                } else if !Self.isBlank(l), let last = inner.last, !Self.isBlank(last),
+                          !Self.startsBlock(l) {
+                    // A lazy continuation of the quoted paragraph.
+                    inner.append(l)
+                } else {
+                    break
+                }
+                i += 1
+            }
+            html += "<blockquote>\n\(blocks(inner[...], tight: false))</blockquote>\n"
+            return html
+        }
+
+        if let marker = Self.listMarker(line) {
+            i = list(lines, from: i, first: marker, into: &html, top: top)
+            return html
+        }
+
+        if i + 1 < end, line.contains("|"), let aligns = Self.tableDelimiter(lines[i + 1]) {
+            let header = Self.cells(line)
+            if header.count == aligns.count {
+                i = table(lines, from: i, header: header, aligns: aligns, into: &html)
+                return html
+            }
+        }
+
+        if Self.isHTMLBlock(line) {
+            var raw: [String] = []
+            while i < end, !Self.isBlank(lines[i]) {
+                raw.append(lines[i])
+                i += 1
+            }
+            html += embedSources(raw.joined(separator: "\n")) + "\n"
+            return html
+        }
+
+        // A paragraph, or a setext heading.
+        var para: [String] = [trimmed]
+        i += 1
+        var setext = 0
+        while i < end {
+            let l = lines[i]
+            if Self.isBlank(l) { break }
+            let t = l.trimmingCharacters(in: .whitespaces)
+            if Self.indent(l) < 4, !t.isEmpty, t.allSatisfy({ $0 == "=" }) { setext = 1; i += 1; break }
+            if Self.indent(l) < 4, !t.isEmpty, t.allSatisfy({ $0 == "-" }) { setext = 2; i += 1; break }
+            if Self.startsBlock(l) { break }
+            para.append(Self.indent(l) >= 4 ? t : String(l.drop(while: { $0 == " " })))
+            i += 1
+        }
+        let text = para.joined(separator: "\n")
+        if setext > 0 {
+            html += heading(setext, text)
+        } else if tight {
+            html += inline(text) + "\n"
+        } else {
+            html += "<p>\(inline(text))</p>\n"
+        }
+        return html
+    }
+
+    // MARK: Changes
+
+    /// A top-level block covering source `lines`, marked if they changed,
+    /// after a marker if text was removed just before it.
+    private mutating func marked(_ out: String, lines range: Range<Int>, after previousEnd: Int) -> String {
+        guard let changes else { return out }
+        var prefix = ""
+        if changes.removed.contains(where: { $0 >= previousEnd && $0 <= range.lowerBound }) {
+            prefix = removedMarker()
+        }
+        // A list marks its own items.
+        if listMarked {
+            listMarked = false
+            return prefix + out
+        }
+        guard changes.touches(range) else { return prefix + out }
+        let id = nextMarkID()
+        return prefix + "<div class=\"kt-change\" id=\"\(id)\">\n\(out)</div>\n"
+    }
+
+    private mutating func removedMarker() -> String {
+        "<div class=\"kt-removed\" id=\"\(nextMarkID())\" title=\"Text was removed here\"></div>\n"
+    }
+
+    private mutating func nextMarkID() -> String {
+        defer { marks += 1 }
+        return "kt-change-\(marks)"
     }
 
     private mutating func heading(_ level: Int, _ text: String) -> String {
@@ -430,14 +536,19 @@ private struct Renderer {
                       contentIndent: lead + digits.count + 1 + (rest.isEmpty ? 1 : max(spaces, 1)), rest: rest)
     }
 
-    private mutating func list(_ lines: ArraySlice<String>, from start: Int, first: Marker, into html: inout String) -> Int {
+    private mutating func list(
+        _ lines: ArraySlice<String>, from start: Int, first: Marker, into html: inout String, top: Bool = false
+    ) -> Int {
         var items: [[String]] = []
+        /// Each item's source lines.
+        var ranges: [Range<Int>] = []
         var i = start
         let end = lines.endIndex
         var marker = first
         var loose = false
 
         while true {
+            let itemStart = i
             var item = [marker.rest]
             i += 1
             var sawBlank = false
@@ -467,6 +578,7 @@ private struct Renderer {
             }
             while item.last == "" { item.removeLast() }
             items.append(item)
+            ranges.append(itemStart..<i)
 
             // The next item of the same list, if there is one.
             var next = i
@@ -483,7 +595,16 @@ private struct Renderer {
         let tag = first.ordered ? "ol" : "ul"
         let startAttr = first.ordered && first.start != 1 ? " start=\"\(first.start)\"" : ""
         html += "<\(tag)\(startAttr)>\n"
-        for var item in items {
+        let marking = top && changes != nil
+        for (n, var item) in items.enumerated() {
+            var mark = ""
+            if marking, let changes {
+                let range = ranges[n]
+                if n > 0, changes.removed.contains(where: { $0 > ranges[n - 1].upperBound - 1 && $0 <= range.lowerBound }) {
+                    html += removedMarker()
+                }
+                if changes.touches(range) { mark = " id=\"\(nextMarkID())\"" }
+            }
             var check = ""
             if let head = item.first, head.count >= 3 {
                 let box = head.prefix(3)
@@ -493,10 +614,13 @@ private struct Renderer {
                     item[0] = String(head.dropFirst(3).drop(while: { $0 == " " }))
                 }
             }
-            let cls = check.isEmpty ? "" : " class=\"task\""
-            html += "<li\(cls)>\(check)\(blocks(item[...], tight: !loose))</li>\n"
+            var classes = check.isEmpty ? [] : ["task"]
+            if !mark.isEmpty { classes.append("kt-change") }
+            let cls = classes.isEmpty ? "" : " class=\"\(classes.joined(separator: " "))\""
+            html += "<li\(cls)\(mark)>\(check)\(blocks(item[...], tight: !loose))</li>\n"
         }
         html += "</\(tag)>\n"
+        if marking { listMarked = true }
         return i
     }
 
@@ -1111,5 +1235,58 @@ private struct Inline {
             i += 1
         }
         return nil
+    }
+}
+
+// MARK: Changes
+
+/// Which lines of a Markdown file changed since an earlier version: lines
+/// added or rewritten, and places where lines were removed, as 0-based
+/// line numbers in the new text.
+struct MarkdownLineChanges: Equatable, Sendable {
+    var changed: Set<Int> = []
+    /// Lines were removed just before this line (the line count: at the end).
+    var removed: Set<Int> = []
+
+    var isEmpty: Bool { changed.isEmpty && removed.isEmpty }
+
+    /// Whether any of `lines` changed, or lines were removed inside them.
+    func touches(_ lines: Range<Int>) -> Bool {
+        changed.contains { lines.contains($0) }
+            || removed.contains { $0 > lines.lowerBound && $0 < lines.upperBound }
+    }
+
+    static func lines(_ text: String) -> [String] {
+        text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+    }
+
+    /// What changed from `old` to `new`.
+    static func between(_ old: String, _ new: String) -> Self {
+        let a = lines(old), b = lines(new)
+        let diff = b.difference(from: a)
+        var removedOld: Set<Int> = []
+        var insertedNew: Set<Int> = []
+        for change in diff {
+            switch change {
+            case .remove(let offset, _, _): removedOld.insert(offset)
+            case .insert(let offset, _, _): insertedNew.insert(offset)
+            }
+        }
+        var result = Self(changed: insertedNew)
+        // Walk both to place each removal in the new text. A removal next
+        // to an insertion is a rewrite, already marked as changed.
+        var i = 0, j = 0
+        while i < a.count || j < b.count {
+            if i < a.count, removedOld.contains(i) {
+                if !insertedNew.contains(j), !insertedNew.contains(j - 1) { result.removed.insert(j) }
+                i += 1
+            } else if j < b.count, insertedNew.contains(j) {
+                j += 1
+            } else {
+                i += 1
+                j += 1
+            }
+        }
+        return result
     }
 }
