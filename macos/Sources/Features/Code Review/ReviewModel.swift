@@ -1148,9 +1148,44 @@ final class ReviewSnapshots {
     /// What's known about who worked in the repository at `root` when, as
     /// seen by tab `id`, to tell its changes from other tabs'.
     func attribution(for id: ObjectIdentifier, root: String) -> ReviewAttribution {
-        ReviewAttribution(
+        let neighbours = neighbours(of: id, root: root)
+        var othersEdits: [String: [Date]] = [:]
+        for other in neighbours {
+            othersEdits.merge(edits[other] ?? [:]) { $0 + $1 }
+        }
+        return ReviewAttribution(
             own: working[id] ?? [],
-            others: neighbours(of: id, root: root).flatMap { working[$0] ?? [] })
+            others: neighbours.flatMap { working[$0] ?? [] },
+            ownEdits: edits[id] ?? [:],
+            othersEdits: othersEdits)
+    }
+
+    /// Files each tab's agent said it was editing, and when: its status
+    /// message names them as it starts each edit ("Edit: /path/to/file").
+    private var edits: [ObjectIdentifier: [String: [Date]]] = [:]
+
+    /// The tools whose status message names a file they're about to write.
+    private static let editTools: Set<String> = ["Edit", "Write", "MultiEdit", "NotebookEdit"]
+
+    /// The file a status message says the agent is about to write, if any.
+    nonisolated static func editedFile(in message: String?) -> String? {
+        guard let message, let colon = message.range(of: ": ") else { return nil }
+        guard editTools.contains(String(message[..<colon.lowerBound])) else { return nil }
+        let path = String(message[colon.upperBound...])
+        guard path.hasPrefix("/") else { return nil }
+        return ReviewAttribution.key(URL(fileURLWithPath: path))
+    }
+
+    /// Called with each status message from a tab's agent.
+    func noteMessage(_ id: ObjectIdentifier, _ message: String?, at now: Date = Date()) {
+        guard let path = Self.editedFile(in: message) else { return }
+        var list = edits[id, default: [:]][path, default: []]
+        list.append(now)
+        edits[id, default: [:]][path] = Array(list.suffix(20))
+        let horizon = now.addingTimeInterval(-Self.memory)
+        if edits[id]!.count > 2000 {
+            edits[id] = edits[id]!.filter { ($0.value.last ?? .distantPast) > horizon }
+        }
     }
 
     func forget(_ controller: BaseTerminalController) {
@@ -1160,19 +1195,36 @@ final class ReviewSnapshots {
     func forget(id: ObjectIdentifier) {
         turns = turns.filter { $0.key.controller != id }
         working[id] = nil
+        edits[id] = nil
     }
 }
 
-/// Whose a changed file is, by when it was last written: a tab's agent
-/// changed it if it was working then. With other tabs' agents in the same
-/// repository, a file written while only one of them was working is theirs.
+/// Whose a changed file is. First by which agent said it was editing it
+/// just before it was written; otherwise by when it was written: a tab's
+/// agent changed it if it was working then. With other tabs' agents in the
+/// same repository, a file written while only one of them was working is
+/// theirs.
 struct ReviewAttribution: Sendable {
     typealias Turn = ReviewSnapshots.Turn
 
     var own: [Turn]
     var others: [Turn]
+    /// Files this tab's agent, and other tabs' agents, said they were
+    /// editing, by `key(_:)`, with when.
+    var ownEdits: [String: [Date]] = [:]
+    var othersEdits: [String: [Date]] = [:]
 
     static let none = ReviewAttribution(own: [], others: [])
+
+    /// How long an edit can take from the agent saying so to the file
+    /// being written.
+    static let editWindow: TimeInterval = 60
+
+    /// A file's path as edits are recorded under: with symlinks resolved,
+    /// so /tmp and /private/tmp are the same.
+    static func key(_ url: URL) -> String {
+        url.standardizedFileURL.resolvingSymlinksInPath().path
+    }
 
     enum Owner: Equatable {
         /// Written while only this tab's agent was working, or while none
@@ -1195,9 +1247,25 @@ struct ReviewAttribution: Sendable {
     /// The owner of the file at `url`, by its modification date. A file
     /// that's gone (or can't be read) is left to this tab.
     func owner(of url: URL, now: Date = Date()) -> Owner {
-        guard !others.isEmpty,
+        guard !others.isEmpty || !othersEdits.isEmpty,
               let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         else { return .own }
-        return owner(writtenAt: date, now: now)
+        return owner(of: Self.key(url), writtenAt: date, now: now)
+    }
+
+    /// By the edit that wrote it, if an agent said so; else by time.
+    func owner(of key: String, writtenAt date: Date, now: Date = Date()) -> Owner {
+        // The latest edit started before the write that could have made it.
+        func latest(_ edits: [String: [Date]]) -> Date? {
+            edits[key]?.filter {
+                $0.addingTimeInterval(-ReviewSnapshots.settle) <= date && date <= $0.addingTimeInterval(Self.editWindow)
+            }.max()
+        }
+        switch (latest(ownEdits), latest(othersEdits)) {
+        case let (own?, other?): return own >= other ? .own : .other
+        case (_?, nil): return .own
+        case (nil, _?): return .other
+        case (nil, nil): return owner(writtenAt: date, now: now)
+        }
     }
 }
