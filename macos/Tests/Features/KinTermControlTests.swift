@@ -116,3 +116,47 @@ struct RunPaneStripTests {
         #expect(AgentWorkers.stripFraction(height: 0, cellHeight: 17) == 0.5)
     }
 }
+
+/// What the Markdown Viewer marks after an agent changed a file.
+struct MarkdownChangesTests {
+    @Test func findsChangedAddedAndRemovedLines() {
+        let old = "# Plan\n\nIntro.\n\n- one\n- two\n- three\n\nEnd.\n"
+        let new = "# Plan\n\nIntro, rewritten.\n\n- one\n- three\n- four\n\nEnd.\n"
+        let changes = MarkdownLineChanges.between(old, new)
+        // Line 2 rewritten; "- four" added at line 6.
+        #expect(changes.changed == [2, 6])
+        // "- two" removed before line 5 ("- three").
+        #expect(changes.removed == [5])
+        #expect(MarkdownLineChanges.between(old, old).isEmpty)
+    }
+
+    @Test func marksOnlyTheBlocksAndItemsThatChanged() {
+        let old = "# Plan\n\nIntro.\n\n- one\n- two\n\nEnd.\n"
+        let new = "# Plan\n\nIntro, rewritten.\n\n- one\n- two, longer\n\nEnd.\n"
+        let file = URL(fileURLWithPath: "/tmp/plan.md")
+        let page = MarkdownRenderer.page(new, file: file, changes: .between(old, new))
+        #expect(page.changes == 2)
+        #expect(page.html.contains("<div class=\"kt-change\" id=\"kt-change-0\">\n<p>Intro, rewritten.</p>"))
+        #expect(page.html.contains("<li class=\"kt-change\" id=\"kt-change-1\">two, longer"))
+        #expect(page.html.contains("<li>one"))
+        #expect(!page.html.contains("kt-change-2"))
+        // Unchanged blocks stay as they were.
+        #expect(page.html.contains("<p>End.</p>"))
+    }
+
+    @Test func marksWhereTextWasRemoved() {
+        let old = "First.\n\nGone.\n\nLast.\n"
+        let new = "First.\n\nLast.\n"
+        let page = MarkdownRenderer.page(new, file: URL(fileURLWithPath: "/tmp/a.md"), changes: .between(old, new))
+        #expect(page.changes == 1)
+        #expect(page.html.contains("class=\"kt-removed\" id=\"kt-change-0\""))
+    }
+
+    @Test func linesKeepTheirNumbersPastFrontMatterAndReferences() {
+        let old = "---\ntitle: x\n---\n[a]: https://a.example\n\nSame.\n\nOld.\n"
+        let new = "---\ntitle: x\n---\n[a]: https://a.example\n\nSame.\n\nNew.\n"
+        let page = MarkdownRenderer.page(new, file: URL(fileURLWithPath: "/tmp/a.md"), changes: .between(old, new))
+        #expect(page.changes == 1)
+        #expect(page.html.contains("<div class=\"kt-change\" id=\"kt-change-0\">\n<p>New.</p>"))
+    }
+}

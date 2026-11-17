@@ -32,9 +32,18 @@ final class MarkdownViewerModel: ObservableObject {
         }
     }
 
+    /// Whether the file list shows in a window of its own. On by default:
+    /// there's room for it.
     @Published var showsSidebar: Bool =
         UserDefaults.standard.object(forKey: "MarkdownViewerSidebar") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showsSidebar, forKey: "MarkdownViewerSidebar") }
+    }
+
+    /// Whether the file list shows beside a terminal or as a grid tile. Off
+    /// by default: there it takes room from the page you opened.
+    @Published var showsDockedSidebar: Bool =
+        UserDefaults.standard.object(forKey: "MarkdownViewerPanelSidebar") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(showsDockedSidebar, forKey: "MarkdownViewerPanelSidebar") }
     }
 
     @Published private(set) var back: [URL] = []
@@ -42,6 +51,21 @@ final class MarkdownViewerModel: ObservableObject {
 
     /// A heading to scroll to once the page loads.
     @Published private(set) var anchor: String?
+
+    /// Files as they were before an agent's turn changed them, to show
+    /// what it changed. Empty: the turn made the file.
+    private var baselines: [URL: String] = [:]
+    /// How many changes the open file shows, and which one was last shown.
+    @Published private(set) var changeCount = 0
+    @Published private(set) var changeIndex = 0
+    /// The open file is one the agent made: all of it is new.
+    @Published private(set) var isNewFile = false
+    /// Whether changes are marked. Off, the page reads as it is.
+    @Published var showsChanges = true {
+        didSet { if showsChanges != oldValue { render(keepScroll: true) } }
+    }
+    /// A file whose first change to scroll to once it's rendered.
+    private var revealing: URL?
 
     private var text = ""
     private var watcher: DispatchSourceFileSystemObject?
@@ -155,10 +179,58 @@ final class MarkdownViewerModel: ObservableObject {
 
     private func render(keepScroll: Bool) {
         guard let current, problem == nil else { return }
-        html = mode == .rendered
-            ? MarkdownRenderer.page(text, file: current)
-            : MarkdownRenderer.sourcePage(text)
+        let baseline = baselines[current]
+        isNewFile = baseline?.isEmpty == true
+        var changes: MarkdownLineChanges?
+        if showsChanges, let baseline, !baseline.isEmpty {
+            changes = MarkdownLineChanges.between(baseline, text)
+        }
+        let page = mode == .rendered
+            ? MarkdownRenderer.page(text, file: current, changes: changes)
+            : MarkdownRenderer.sourcePage(text, changes: changes)
+        changeCount = page.changes
+        if changeIndex >= changeCount { changeIndex = 0 }
+        if revealing == current {
+            revealing = nil
+            if changeCount > 0 {
+                changeIndex = 0
+                anchor = Self.changeID(0)
+            }
+        }
+        html = page.html
         if keepScroll { revision += 1 } else { revision = 0 }
+    }
+
+    // MARK: Changes
+
+    nonisolated static func changeID(_ index: Int) -> String { "kt-change-\(index)" }
+
+    /// Show what changed in `url` since `before`, its text before an
+    /// agent's turn ("" when the turn made it; nil when it isn't known),
+    /// and scroll to the first change when it's shown.
+    func compare(_ url: URL, with before: String?) {
+        let url = url.standardizedFileURL
+        baselines[url] = before
+        guard before != nil else { return }
+        showsChanges = true
+        revealing = url
+        if url == current { load(keepScroll: true) }
+    }
+
+    func nextChange() { goToChange(changeIndex + 1) }
+    func previousChange() { goToChange(changeIndex - 1) }
+
+    private func goToChange(_ index: Int) {
+        guard changeCount > 0 else { return }
+        changeIndex = (index % changeCount + changeCount) % changeCount
+        anchor = Self.changeID(changeIndex)
+    }
+
+    /// Done reading the changes: show the page as it is.
+    func dismissChanges() {
+        guard let current else { return }
+        baselines[current] = nil
+        render(keepScroll: true)
     }
 
     // MARK: Watching
