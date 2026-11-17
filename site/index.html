@@ -892,7 +892,7 @@ section[id]{scroll-margin-top:64px}
         </article>
         <article class="tile w4 reveal">
           <h3>One agent runs the others</h3>
-          <p>Agents in KinTerm can drive KinTerm. Ask one for a big change and it can split the work: start Claude Code or Codex workers in tabs of their own, each in its own git worktree, wait until they finish or need an answer, read what they did and reply. Every worker is a normal tab you can watch and type into. Agents also run dev servers in a pane beside them, notify you, open the review at the file to look at first, and show you the plans and docs they write, rendered, in the Markdown Viewer <span class="kbd">&#8984;&#8679;M</span>.</p>
+          <p>Agents in KinTerm can drive KinTerm. Ask one for a big change and it can split the work: start Claude Code or Codex workers in tabs of their own, each in its own git worktree, wait until they finish or need an answer, read what they did and reply. Every worker is a normal tab you can watch and type into. Agents also run dev servers in a small pane under them (hide it from its right-click menu and it keeps running), notify you, open the review at the file to look at first, and show you the plans and docs they write, rendered, in the Markdown Viewer, with what they changed highlighted <span class="kbd">&#8984;&#8679;M</span>.</p>
           <div class="demo">
             <div class="mterm" aria-label="An agent starting two workers and waiting for them">
               <div><span class="p">&#10095;</span> kinterm-ctl agent spawn --name api --worktree -- claude &quot;Add rate limiting&hellip;&quot;</div>
