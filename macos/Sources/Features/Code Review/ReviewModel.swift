@@ -437,12 +437,18 @@ final class ReviewModel: ObservableObject {
 
             // Each repository's snapshot for this scope, if one was taken.
             var snapshots: [String: ReviewSnapshot] = [:]
+            // And what other tabs' agents in the same repository wrote
+            // meanwhile, which is theirs, not this tab's.
+            var attributions: [String: ReviewAttribution] = [:]
             var missingSnapshot = false
             if scope != .uncommitted {
                 for repo in workspace.repos {
                     let turns = controllerID.flatMap { ReviewSnapshots.shared.turns(for: $0, root: repo.root) }
                     if let snapshot = scope == .session ? turns?.first : turns?.last {
                         snapshots[repo.prefix] = snapshot
+                        if let controllerID {
+                            attributions[repo.prefix] = ReviewSnapshots.shared.attribution(for: controllerID, root: repo.root)
+                        }
                     } else {
                         missingSnapshot = true
                     }
@@ -452,7 +458,8 @@ final class ReviewModel: ObservableObject {
             let results = await withTaskGroup(of: (Int, ReviewRepoResult).self) { group in
                 for (i, repo) in workspace.repos.enumerated() {
                     let snapshot = snapshots[repo.prefix]
-                    group.addTask { (i, await Self.load(repo, snapshot: snapshot)) }
+                    let attribution = attributions[repo.prefix] ?? .none
+                    group.addTask { (i, await Self.load(repo, snapshot: snapshot, attribution: attribution)) }
                 }
                 var results = [ReviewRepoResult?](repeating: nil, count: workspace.repos.count)
                 for await (i, result) in group { results[i] = result }
@@ -491,13 +498,20 @@ final class ReviewModel: ObservableObject {
     }
 
     /// One repository's branch and changes, with workspace paths.
-    nonisolated private static func load(_ repo: ReviewRepo, snapshot: ReviewSnapshot?) async -> ReviewRepoResult {
+    nonisolated private static func load(_ repo: ReviewRepo, snapshot: ReviewSnapshot?,
+                                         attribution: ReviewAttribution = .none) async -> ReviewRepoResult {
         let branch = await ReviewGit.branch(in: repo.root)
         var base = await ReviewGit.head(in: repo.root)
         if let snapshot { base = snapshot.commit }
         let state = ReviewRepoState(branch: branch, base: base)
         do {
-            let files = try await ReviewGit.changes(in: repo.root, against: base, snapshot: snapshot)
+            var files = try await ReviewGit.changes(in: repo.root, against: base, snapshot: snapshot)
+            // Left out: files another tab's agent wrote while this one's
+            // wasn't working. Those it could have written too stay.
+            let now = Date()
+            files.removeAll {
+                attribution.owner(of: URL(fileURLWithPath: repo.root).appendingPathComponent($0.path), now: now) == .other
+            }
             return ReviewRepoResult(state: state, files: files.map { $0.inRepo(repo.prefix) }, error: nil)
         } catch {
             return ReviewRepoResult(state: state, files: [], error: error.localizedDescription)
@@ -1058,6 +1072,16 @@ final class ReviewSnapshots {
     /// The first snapshot and the latest, per tab and repository.
     private var turns: [Key: [ReviewSnapshot]] = [:]
 
+    /// When each tab's agent was working, newest last; an open end is now.
+    /// Several tabs' agents can work in one repository, and git can't say
+    /// whose a change is, so it goes by when the file was written.
+    private var working: [ObjectIdentifier: [Turn]] = [:]
+
+    struct Turn: Equatable {
+        var start: Date
+        var end: Date?
+    }
+
     func turns(for controller: ObjectIdentifier, root: String) -> [ReviewSnapshot]? {
         turns[Key(controller: controller, root: root)]
     }
@@ -1067,6 +1091,7 @@ final class ReviewSnapshots {
     func statusChanged(_ controller: BaseTerminalController,
                        from old: Ghostty.Action.ProgramStatus.State?,
                        to new: Ghostty.Action.ProgramStatus.State?) {
+        recordWorking(ObjectIdentifier(controller), working: new == .working, at: Date())
         guard new == .working, old != .working,
               let pwd = controller.focusedSurface?.pwd ?? controller.surfaceTree.first?.pwd else { return }
         let id = ObjectIdentifier(controller)
@@ -1091,8 +1116,88 @@ final class ReviewSnapshots {
         turns[key] = list
     }
 
+    func recordWorking(_ id: ObjectIdentifier, working isWorking: Bool, at now: Date) {
+        var list = working[id] ?? []
+        let open = list.last.map { $0.end == nil } ?? false
+        if isWorking, !open {
+            list.append(Turn(start: now))
+        } else if !isWorking, open {
+            list[list.count - 1].end = now
+        } else {
+            return
+        }
+        // Only turns that could still overlap a turn being looked at.
+        let horizon = now.addingTimeInterval(-Self.memory)
+        list.removeAll { ($0.end ?? now) < horizon }
+        working[id] = list.suffix(100)
+    }
+
+    /// How long ago a turn can have ended and still matter.
+    private static let memory: TimeInterval = 24 * 60 * 60
+
+    /// How long after an agent stops its writes can still land: the status
+    /// comes from a hook, which can beat the last write to the disk.
+    static let settle: TimeInterval = 2
+
+    /// The tabs other than `id` with a snapshot in the repository at `root`:
+    /// the ones whose agents work there.
+    private func neighbours(of id: ObjectIdentifier, root: String) -> [ObjectIdentifier] {
+        turns.keys.filter { $0.root == root && $0.controller != id }.map(\.controller)
+    }
+
+    /// What's known about who worked in the repository at `root` when, as
+    /// seen by tab `id`, to tell its changes from other tabs'.
+    func attribution(for id: ObjectIdentifier, root: String) -> ReviewAttribution {
+        ReviewAttribution(
+            own: working[id] ?? [],
+            others: neighbours(of: id, root: root).flatMap { working[$0] ?? [] })
+    }
+
     func forget(_ controller: BaseTerminalController) {
-        let id = ObjectIdentifier(controller)
+        forget(id: ObjectIdentifier(controller))
+    }
+
+    func forget(id: ObjectIdentifier) {
         turns = turns.filter { $0.key.controller != id }
+        working[id] = nil
+    }
+}
+
+/// Whose a changed file is, by when it was last written: a tab's agent
+/// changed it if it was working then. With other tabs' agents in the same
+/// repository, a file written while only one of them was working is theirs.
+struct ReviewAttribution: Sendable {
+    typealias Turn = ReviewSnapshots.Turn
+
+    var own: [Turn]
+    var others: [Turn]
+
+    static let none = ReviewAttribution(own: [], others: [])
+
+    enum Owner: Equatable {
+        /// Written while only this tab's agent was working, or while none
+        /// was (by you, say).
+        case own
+        /// Written while this tab's agent and another were both working.
+        case shared
+        /// Written while another tab's agent was working and this one wasn't.
+        case other
+    }
+
+    func owner(writtenAt date: Date, now: Date = Date()) -> Owner {
+        func covers(_ turn: Turn) -> Bool {
+            turn.start <= date && date <= (turn.end ?? now).addingTimeInterval(ReviewSnapshots.settle)
+        }
+        guard others.contains(where: covers) else { return .own }
+        return own.contains(where: covers) ? .shared : .other
+    }
+
+    /// The owner of the file at `url`, by its modification date. A file
+    /// that's gone (or can't be read) is left to this tab.
+    func owner(of url: URL, now: Date = Date()) -> Owner {
+        guard !others.isEmpty,
+              let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        else { return .own }
+        return owner(writtenAt: date, now: now)
     }
 }

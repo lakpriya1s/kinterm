@@ -32,9 +32,18 @@ final class MarkdownViewerModel: ObservableObject {
         }
     }
 
+    /// Whether the file list shows in a window of its own. On by default:
+    /// there's room for it.
     @Published var showsSidebar: Bool =
         UserDefaults.standard.object(forKey: "MarkdownViewerSidebar") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showsSidebar, forKey: "MarkdownViewerSidebar") }
+    }
+
+    /// Whether the file list shows beside a terminal or as a grid tile. Off
+    /// by default: there it takes room from the page you opened.
+    @Published var showsDockedSidebar: Bool =
+        UserDefaults.standard.object(forKey: "MarkdownViewerPanelSidebar") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(showsDockedSidebar, forKey: "MarkdownViewerPanelSidebar") }
     }
 
     @Published private(set) var back: [URL] = []

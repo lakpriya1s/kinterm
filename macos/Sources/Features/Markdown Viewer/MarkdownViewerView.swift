@@ -15,11 +15,17 @@ struct MarkdownViewerView: View {
     var switchPlacement: (() -> Void)?
     var close: (() -> Void)?
 
+    /// The file list's switch for where this viewer is: beside a terminal
+    /// (or a grid tile) and in a window each remember their own.
+    private var showsSidebar: Binding<Bool> {
+        placement == .panel ? $model.showsDockedSidebar : $model.showsSidebar
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             toolbar
             Divider().overlay(ReviewColors.border)
-            if model.showsSidebar {
+            if showsSidebar.wrappedValue {
                 HSplitView {
                     MarkdownFileList(model: model, chooseFolder: chooseFolder)
                         .frame(minWidth: 180, idealWidth: 240, maxWidth: 420)
@@ -34,8 +40,8 @@ struct MarkdownViewerView: View {
 
     private var toolbar: some View {
         HStack(spacing: 2) {
-            BrowserButton(symbol: "sidebar.left", help: "Show or Hide the File List", active: model.showsSidebar) {
-                model.showsSidebar.toggle()
+            BrowserButton(symbol: "sidebar.left", help: "Show or Hide the File List", active: showsSidebar.wrappedValue) {
+                showsSidebar.wrappedValue.toggle()
             }
             BrowserButton(symbol: "chevron.left", help: "Back", enabled: !model.back.isEmpty) { model.goBack() }
             BrowserButton(symbol: "chevron.right", help: "Forward", enabled: !model.forward.isEmpty) { model.goForward() }
