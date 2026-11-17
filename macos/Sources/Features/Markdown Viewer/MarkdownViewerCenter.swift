@@ -151,16 +151,20 @@ final class MarkdownViewerCenter: NSObject, ObservableObject, NSMenuItemValidati
     /// Show Markdown an agent in `controller`'s tab just wrote, without
     /// taking the keyboard: in the tab's viewer, which switches to it where
     /// it is, or a new one beside the terminal or in the grid.
+    /// `before` is the file's text before the turn ("" if the turn made
+    /// it): the viewer marks what changed and scrolls to the first change.
     @MainActor
-    func autoOpen(file: URL, for controller: BaseTerminalController) {
+    func autoOpen(file: URL, for controller: BaseTerminalController, before: String? = nil) {
         let file = file.standardizedFileURL
         if let found = existing(for: controller) {
             if let window = found.window { adopt(window, by: controller) }
+            found.model.compare(file, with: before)
             if found.model.current != file { show(file, in: found.model) }
             return
         }
         Task {
             let model = MarkdownViewerModel(root: await Self.root(for: file.deletingLastPathComponent()))
+            model.compare(file, with: before)
             model.open(file)
             self.dock(model, for: controller)
         }

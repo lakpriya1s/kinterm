@@ -105,6 +105,9 @@ struct ReviewSnapshot: Hashable {
     let commit: String
     let untracked: Set<String>
     let date: Date
+    /// The text of untracked Markdown files then, which the commit doesn't
+    /// hold, so the Markdown Viewer can show what a turn changed in them.
+    var markdown: [String: String] = [:]
 }
 
 enum ReviewGitError: LocalizedError {
@@ -258,7 +261,28 @@ enum ReviewGit {
         }
         // A clean tree has nothing to stash: HEAD is the snapshot.
         if commit.isEmpty { commit = await head(in: root) }
-        return ReviewSnapshot(commit: commit, untracked: Set(untracked), date: Date())
+        var markdown: [String: String] = [:]
+        var total = 0
+        for path in untracked where MarkdownRenderer.isMarkdown(path) && markdown.count < 200 {
+            guard case .text(let text) = contents(of: path, in: root), text.utf8.count <= 512 << 10 else { continue }
+            total += text.utf8.count
+            guard total <= 8 << 20 else { break }
+            markdown[path] = text
+        }
+        return ReviewSnapshot(commit: commit, untracked: Set(untracked), date: Date(), markdown: markdown)
+    }
+
+    /// The text of `path` at `rev`, or nil if it wasn't there.
+    static func text(of path: String, at rev: String, in root: String) async -> String? {
+        guard let output = try? await run(["show", "\(rev):\(path)"], in: root), output.status == 0 else { return nil }
+        return output.text
+    }
+
+    /// A file's text when `snapshot` was taken: "" if it wasn't there yet,
+    /// nil if that isn't known.
+    static func text(of path: String, at snapshot: ReviewSnapshot, in root: String) async -> String? {
+        if snapshot.untracked.contains(path) { return snapshot.markdown[path] }
+        return await text(of: path, at: snapshot.commit, in: root) ?? ""
     }
 
     /// The paths that changed since `snapshot` and are still there:
