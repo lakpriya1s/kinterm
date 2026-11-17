@@ -3,7 +3,8 @@
 #
 #   Your terminal
 #     kinterm-ctl run [--name N] [--right|--down|--left|--up] [--cwd DIR] -- CMD...
-#                                 run CMD in a new pane beside this one (a dev server, tests)
+#                                 run CMD in a new pane (a dev server, tests): a strip a few
+#                                 lines tall under this one, or half of it on the side given
 #     kinterm-ctl logs NAME [--lines N]   what a pane started with `run` shows
 #     kinterm-ctl status STATE [MSG]      show STATE on this tab: idle working done blocked error clear
 #     kinterm-ctl notify [--title T] MSG  a notification that leads back to this terminal
@@ -155,7 +156,7 @@ make_worktree() {
 spawn() {
   kind=$1
   shift
-  name="" cwd="" direction=right worktree=false allow=false
+  name="" cwd="" direction="" worktree=false allow=false
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --name) name=${2:-}; shift 2 ;;

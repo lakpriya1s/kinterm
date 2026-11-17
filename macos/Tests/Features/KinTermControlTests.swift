@@ -102,6 +102,21 @@ struct MarkdownRendererTests {
     }
 }
 
+@MainActor
+struct RunPaneStripTests {
+    @Test func aRunPaneIsAStripAFewLinesTall() {
+        // 8 lines of 17pt and a little padding, out of a 900pt terminal.
+        let fraction = AgentWorkers.stripFraction(height: 900, cellHeight: 17)
+        #expect(fraction > 0.16 && fraction < 0.2)
+        // A short terminal: never more than half.
+        #expect(AgentWorkers.stripFraction(height: 200, cellHeight: 17) == 0.5)
+        // A tall one: never less than a sixth.
+        #expect(AgentWorkers.stripFraction(height: 3000, cellHeight: 17) == 1.0 / 6)
+        // Not laid out yet: half, as a split always was.
+        #expect(AgentWorkers.stripFraction(height: 0, cellHeight: 17) == 0.5)
+    }
+}
+
 /// What the Markdown Viewer marks after an agent changed a file.
 struct MarkdownChangesTests {
     @Test func findsChangedAddedAndRemovedLines() {

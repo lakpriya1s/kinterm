@@ -649,6 +649,13 @@ extension SplitTree.Node {
         }
     }
 
+    /// The split that holds `view` directly, as one of its two sides.
+    func parentSplit(of view: ViewType) -> Self? {
+        guard case .split(let split) = self else { return nil }
+        if split.left == .leaf(view: view) || split.right == .leaf(view: view) { return self }
+        return split.left.parentSplit(of: view) ?? split.right.parentSplit(of: view)
+    }
+
     /// Resize a split node to the specified ratio.
     /// For leaf nodes, this returns the node unchanged.
     /// For split nodes, this creates a new split with the updated ratio.

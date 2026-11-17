@@ -1660,6 +1660,9 @@ extension Ghostty {
             menu.addItem(.separator())
             item = menu.addItem(withTitle: "Close Split", action: #selector(closeSurface(_:)), keyEquivalent: "")
             item.setImageIfDesired(systemSymbolName: "xmark.rectangle")
+            if let controller = window?.windowController as? BaseTerminalController {
+                MainActor.assumeIsolated { controller.addPaneVisibilityItems(to: menu, for: self) }
+            }
 
             menu.addItem(.separator())
             item = menu.addItem(withTitle: "Reset Terminal", action: #selector(resetTerminal(_:)), keyEquivalent: "")
