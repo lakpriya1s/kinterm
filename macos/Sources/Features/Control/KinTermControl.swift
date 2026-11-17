@@ -163,7 +163,7 @@ enum KinTermControl {
         guard let uuid = UUID(uuidString: id) else { return nil }
         for window in NSApp.windows {
             guard let controller = window.windowController as? BaseTerminalController,
-                  let surface = controller.surfaceTree.first(where: { $0.id == uuid }) else { continue }
+                  let surface = controller.allSurfaces.first(where: { $0.id == uuid }) else { continue }
             return (controller, surface)
         }
         return nil
@@ -325,15 +325,27 @@ final class AgentWorkers {
         let made: Ghostty.SurfaceView
         switch kind {
         case .pane:
+            // Without a direction, a strip under the terminal a few lines
+            // tall: enough to see a dev server's last lines without giving
+            // it half the screen. Asked for a side, half of it, as before.
             let direction: SplitTree<Ghostty.SurfaceView>.NewDirection
+            var strip = false
             switch request["direction"] as? String {
             case "left": direction = .left
             case "up": direction = .up
             case "down": direction = .down
-            default: direction = .right
+            case "right": direction = .right
+            default:
+                direction = .down
+                strip = true
             }
+            let height = parent.bounds.height
+            let cell = parent.cellSize.height
             guard let view = controller.newSplit(at: parent, direction: direction, baseConfig: config) else {
                 return .failure(.init(message: "KinTerm couldn't split this terminal."))
+            }
+            if strip {
+                controller.resizeSplit(around: view, to: 1 - Self.stripFraction(height: height, cellHeight: cell))
             }
             made = view
 
@@ -363,6 +375,24 @@ final class AgentWorkers {
         return .success(worker)
     }
 
+    /// How many lines of output a strip for a `run` pane shows.
+    static let stripLines: CGFloat = 8
+
+    /// The part of a terminal `height` points tall that a strip takes:
+    /// `stripLines` lines and a little for padding, at least a sixth and
+    /// at most half.
+    static func stripFraction(height: CGFloat, cellHeight: CGFloat) -> Double {
+        guard height > 0 else { return 0.5 }
+        let cell = cellHeight > 0 ? cellHeight : 17
+        let wanted = cell * (stripLines + 1) + 8
+        return Double(min(0.5, max(1.0 / 6, wanted / height)))
+    }
+
+    /// The worker running in `surface`, if one does.
+    func worker(for surface: Ghostty.SurfaceView) -> Worker? {
+        all[surface.id]
+    }
+
     func commandFinished(in surface: Ghostty.SurfaceView, exitCode: Int) {
         guard let worker = all[surface.id] else { return }
         worker.commandEnded = (Date(), exitCode >= 0 ? exitCode : nil)
@@ -371,8 +401,13 @@ final class AgentWorkers {
     /// Close the worker's terminal, without asking: it's the parent's.
     func kill(_ worker: Worker) {
         defer { forget(worker) }
-        guard let surface = worker.surface,
-              let controller = BaseTerminalController.controller(owning: surface) else { return }
+        guard let surface = worker.surface else { return }
+        // Hidden: letting it go ends it.
+        if let controller = BaseTerminalController.controller(hiding: surface) {
+            controller.dropHiddenPane(surface)
+            return
+        }
+        guard let controller = BaseTerminalController.controller(owning: surface) else { return }
         controller.closeSurface(surface, withConfirmation: false)
     }
 

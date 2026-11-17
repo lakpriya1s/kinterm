@@ -58,11 +58,12 @@ errors, and the thing you changed works when clicked.
 
 ## Run long-lived things where the user can see them
 
-Start dev servers, watchers and long test runs in a pane beside your
-terminal instead of in the background, then read their output:
+Start dev servers, watchers and long test runs in a small pane under your
+terminal instead of in the background, then read their output. Give a side
+only when the user should watch it closely: that pane takes half the terminal.
 
 ```sh
-kinterm-ctl run --name web -- 'npm run dev'   # a pane to the right (--down, --left, --up)
+kinterm-ctl run --name web -- 'npm run dev'   # a strip a few lines tall below; --right/--down/--left/--up for half the terminal
 kinterm-ctl logs web --lines 50               # what it printed
 kinterm-ctl agent kill web                    # stop it and close the pane
 ```

@@ -115,16 +115,22 @@ const tools = [
   {
     name: "run",
     description:
-      "Run a shell command in a new pane beside your terminal, where the user can watch it: dev servers, " +
-      "watchers, long test runs. Returns the pane's name; read its output with `logs`. Prefer this to " +
-      "running long-lived processes in the background.",
+      "Run a shell command in a new pane where the user can watch it: dev servers, watchers, long test " +
+      "runs. By default the pane is a strip a few lines tall under your terminal, so it doesn't take half " +
+      "the screen; give a direction only when the user should watch it closely (it then gets half). " +
+      "Returns the pane's name; read its output with `logs`. Prefer this to running long-lived processes " +
+      "in the background.",
     inputSchema: {
       type: "object",
       properties: {
         command: str("The shell command."),
         name: str("A short name for the pane (letters, digits, . _ -). Default: pane-N."),
         cwd: str("Folder to run in. Default: your terminal's."),
-        direction: { type: "string", enum: ["right", "down", "left", "up"], description: "Where the pane goes." },
+        direction: {
+          type: "string",
+          enum: ["right", "down", "left", "up"],
+          description: "Put the pane on this side, at half the terminal. Leave out for a small strip below.",
+        },
       },
       required: ["command"],
     },
@@ -135,7 +141,7 @@ const tools = [
         name: a.name ?? "",
         command: a.command,
         cwd: a.cwd ?? process.cwd(),
-        direction: a.direction ?? "right",
+        direction: a.direction ?? "",
       });
       return `Started pane ${reply.worker.name}. Read its output with logs(name: "${reply.worker.name}").`;
     },
@@ -377,7 +383,7 @@ async function handle(message) {
             "terminal (`kinterm-browser open URL`, or the kinterm-browser MCP tools), not `open`, Playwright " +
             "or another browser.\n" +
             "- A plan, notes or docs you wrote in Markdown: `markdown`, not pasted into the chat.\n" +
-            "- A long-running command (a dev server, tests): `run`, so it shows in a pane.\n" +
+            "- A long-running command (a dev server, tests): `run`, so it shows in a small pane below.\n" +
             "- When you hand work over: `review`. When you finish something long: `notify`.\n" +
             "- A large task with independent parts: agent_* to split it across agents in their own tabs.\n" +
             "The kinterm skill has the details; load it before any of these.",

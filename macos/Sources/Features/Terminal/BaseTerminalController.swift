@@ -53,6 +53,9 @@ class BaseTerminalController: NSWindowController,
         }
     }
 
+    /// Panes taken out of the splits that still run; see HiddenPanes.swift.
+    var hiddenPanes: [HiddenPane] = []
+
     /// This can be set to show/hide the command palette.
     @Published var commandPaletteIsShowing: Bool = false
 
@@ -690,6 +693,8 @@ class BaseTerminalController: NSWindowController,
 
     @objc private func ghosttyDidCloseSurface(_ notification: Notification) {
         guard let target = notification.object as? Ghostty.SurfaceView else { return }
+        // A hidden pane whose shell exited: let it go.
+        if MainActor.assumeIsolated({ dropHiddenPane(target) }) { return }
         guard let node = surfaceTree.root?.node(view: target) else { return }
         closeSurface(
             node,
@@ -986,6 +991,13 @@ class BaseTerminalController: NSWindowController,
         case .drop(let drop):
             splitDidDrop(source: drop.payload, destination: drop.destination, zone: drop.zone)
         }
+    }
+
+    /// Set the ratio of the split `view` was just put in, the first side's
+    /// share (the top, or the left).
+    func resizeSplit(around view: Ghostty.SurfaceView, to ratio: Double) {
+        guard let root = surfaceTree.root, let split = root.parentSplit(of: view) else { return }
+        splitDidResize(node: split, to: ratio)
     }
 
     private func splitDidResize(node: SplitTree<Ghostty.SurfaceView>.Node, to newRatio: Double) {

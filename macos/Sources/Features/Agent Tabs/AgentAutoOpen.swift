@@ -210,7 +210,7 @@ final class AgentAutoOpen: NSObject {
     /// The terminal devices of the tab's panes: the agent's, and the panes
     /// it ran things in.
     private static func ttys(of controller: BaseTerminalController) -> [dev_t] {
-        controller.surfaceTree.compactMap { surface in
+        controller.allSurfaces.compactMap { surface in
             guard let name = surface.surfaceModel?.ttyName else { return nil }
             return ControlPeer.device(ofTTY: name.hasPrefix("/") ? name : "/dev/\(name)")
         }

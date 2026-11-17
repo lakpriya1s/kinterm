@@ -127,7 +127,7 @@ kinterm-browser mcp            # the MCP server, for any agent
 ```
 
 **Agents can drive KinTerm itself**, with `kinterm-ctl` or the `kinterm` MCP server that
-Connect Agents adds. An agent can run a dev server or tests in a pane beside it and read
+Connect Agents adds. An agent can run a dev server or tests in a small pane under it and read
 the output, notify you when it's done, open the review at the files to look at first, and
 show you a plan or doc it wrote in the Markdown Viewer. Even without asking, when an
 agent's turn ends KinTerm opens the Markdown it wrote, the review of the files it changed,
@@ -138,7 +138,7 @@ its own git worktree), wait for them, read what they did, answer their questions
 close them. You can watch and type into every one of those tabs.
 
 ```sh
-kinterm-ctl run --name web -- 'npm run dev'      # a pane beside this terminal
+kinterm-ctl run --name web -- 'npm run dev'      # a small strip under this terminal
 kinterm-ctl logs web                             # what it printed
 kinterm-ctl notify "Done: 3 files to review"     # a notification that leads back here
 kinterm-ctl review src/auth.ts                   # open the review at that file
