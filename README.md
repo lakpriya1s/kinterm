@@ -69,7 +69,8 @@ A tab with splits shows its most urgent agent: waiting, then error, done, workin
 | ✅ | **Review Changes.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd> shows what an agent changed as GitHub-style diffs, in a folder tree, across every repo of a VS Code workspace. [More below](#work-alongside-your-agents) |
 | 🌐 | **A browser agents can use.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>B</kbd> opens your dev server beside the terminal, with Chrome's DevTools. [More below](#work-alongside-your-agents) |
 | 📝 | **Markdown Viewer.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>M</kbd> opens a viewer beside the terminal (a tile in Grid View, or pop it out into its own window) that renders the repo's Markdown files (plans, notes, `AGENTS.md`), with a file list you can show beside them, and reloads as an agent edits them. When an agent changes a file, what it changed is highlighted and the page scrolls there; step through the changes from the toolbar. <kbd>⌘</kbd>-click a `.md` path in a terminal to open it there, and agents open what they wrote with `kinterm-ctl markdown` |
-| 🔘 | **Buttons for the tools.** Grid View, Review Changes and the browser sit at the end of the tab bar, lit while open, with a count of changed files on Review |
+| ☕ | **Keeps your Mac awake while agents work.** A long agent run doesn't stall because the Mac went to sleep. Also for a set time, until you turn it off, or until one tab's command finishes. A cup in the tab bar and the menu bar, <kbd>⌥</kbd><kbd>⌘</kbd><kbd>K</kbd> to turn it on. [More below](#keep-your-mac-awake) |
+| 🔘 | **Buttons for the tools.** Grid View, Review Changes, the browser and Keep Mac Awake sit at the end of the tab bar, lit while on, with a count of changed files on Review |
 | ♻️ | **Picks up where you left off.** After you quit, restart or crash, windows come back as they were: agent tabs resume their Claude Code or Codex session, other terminals show their old output. [More below](#pick-up-where-you-left-off) |
 | 📋 | **Copy agent text whole.** <kbd>⌘</kbd><kbd>⇧</kbd><kbd>C</kbd> copies text an agent broke into lines (paragraphs, commands, links) as one piece, and <kbd>⌘</kbd>-click opens links split across lines. [More below](#copy-agent-text-whole) |
 | 🎨 | **Tab colours.** Right-click a tab, or an account, to give it a colour |
@@ -145,6 +146,8 @@ kinterm-ctl logs web                             # what it printed
 kinterm-ctl notify "Done: 3 files to review"     # a notification that leads back here
 kinterm-ctl review src/auth.ts                   # open the review at that file
 kinterm-ctl markdown docs/plan.md                # show it rendered in the Markdown Viewer
+kinterm-ctl awake --for 90m "full test suite"    # keep the Mac awake while it runs
+kinterm-ctl run --keep-awake -- 'make release'   # awake until that command exits
 
 kinterm-ctl agent spawn --name api --worktree -- claude "Add rate limiting to the API"
 kinterm-ctl agent wait api                       # until it finishes or needs someone
@@ -158,6 +161,32 @@ tabs. KinTerm checks this from the processes, not from anything a program claims
 request counts only if the process that sent it runs in that terminal. A worker can't
 start workers of its own unless it was allowed to. Workers are ordinary tabs again after
 KinTerm restarts.
+
+## Keep your Mac awake
+
+Start a long agent run, walk away, and the Mac goes to sleep ten minutes later with the
+work half done. KinTerm can keep it awake. The ☕ cup at the end of the tab bar and in
+the menu bar (filled while on) opens the choices; <kbd>⌥</kbd><kbd>⌘</kbd><kbd>K</kbd> turns it on
+until you turn it off, or off again.
+
+- **While agents work** (on by default): awake while an agent in any tab is working, and
+  for a few minutes after the last one finishes, so you can read what it did.
+- **For 15 minutes, 1, 2 or 4 hours**, with the time left beside the cup, or **until you
+  turn it off**.
+- **Until this finishes**: right-click a terminal or an agent tab, and the Mac stays awake
+  until its command exits or its agent ends its turn.
+- **Agents can ask for it** during a long build or test run (`kinterm-ctl awake`, the
+  `keep_awake` MCP tool, or `run --keep-awake`). It ends with their turn, after two hours
+  at most unless they ask for longer.
+
+Options (in the cup's menu): let the display sleep or keep it on, whether an agent waiting
+on you counts and for how long, how long to stay awake after agents finish, stop on battery
+or below 20% or 10%, and a notification when the Mac can sleep again. The command palette has
+it all as **Keep Awake: …**.
+
+It holds the same power assertion as `caffeinate` (see `pmset -g assertions`), and macOS
+lets go of it if KinTerm quits. Closing the lid still sleeps a Mac that isn't plugged in
+with an external display.
 
 ## Pick up where you left off
 
