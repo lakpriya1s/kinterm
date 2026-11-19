@@ -1,14 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0"><channel><title>KinTerm</title><link>https://github.com/lakpriya1s/kinterm</link><item><title>KinTerm 0.1.4</title><pubDate>Sat, 24 Oct 2026 18:33:20 +0000</pubDate><sparkle:version>202610241828</sparkle:version><sparkle:shortVersionString>0.1.4</sparkle:shortVersionString><sparkle:minimumSystemVersion>13.0.0</sparkle:minimumSystemVersion><sparkle:fullReleaseNotesLink>https://github.com/lakpriya1s/kinterm/releases/tag/kinterm-v0.1.4</sparkle:fullReleaseNotesLink><description>
-&lt;h1&gt;KinTerm 0.1.4&lt;/h1&gt;
-&lt;p&gt;
-Built from commit &lt;code&gt;&lt;a href="https://github.com/lakpriya1s/kinterm/commit/385484d681cb97f1f26ea751e2ba08b90284a9c5"&gt;385484d68&lt;/a&gt;&lt;/code&gt;
-on 2026-10-24.
-&lt;/p&gt;
-&lt;p&gt;
-See what's new in the &lt;a href="https://github.com/lakpriya1s/kinterm/releases/tag/kinterm-v0.1.4"&gt;release notes&lt;/a&gt;.
-&lt;/p&gt;
-</description><enclosure url="https://github.com/lakpriya1s/kinterm/releases/download/kinterm-v0.1.4/KinTerm.dmg" type="application/octet-stream" sparkle:edSignature="OErwlRpCc1GQHrZn6CPJYmzJo0F0ltFuBoqWa2rPWgS8Z2ckkCrW+zpjiE2g8xjVCxTifyJbqKUoV/KUc8wbDw==" length="35446396" /></item><item><title>KinTerm 0.1.5</title><pubDate>Sun, 25 Oct 2026 04:53:41 +0000</pubDate><sparkle:version>202610250449</sparkle:version><sparkle:shortVersionString>0.1.5</sparkle:shortVersionString><sparkle:minimumSystemVersion>13.0.0</sparkle:minimumSystemVersion><sparkle:fullReleaseNotesLink>https://github.com/lakpriya1s/kinterm/releases/tag/kinterm-v0.1.5</sparkle:fullReleaseNotesLink><description>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0"><channel><title>KinTerm</title><link>https://github.com/lakpriya1s/kinterm</link><item><title>KinTerm 0.1.5</title><pubDate>Sun, 25 Oct 2026 04:53:41 +0000</pubDate><sparkle:version>202610250449</sparkle:version><sparkle:shortVersionString>0.1.5</sparkle:shortVersionString><sparkle:minimumSystemVersion>13.0.0</sparkle:minimumSystemVersion><sparkle:fullReleaseNotesLink>https://github.com/lakpriya1s/kinterm/releases/tag/kinterm-v0.1.5</sparkle:fullReleaseNotesLink><description>
 &lt;h1&gt;KinTerm 0.1.5&lt;/h1&gt;
 &lt;p&gt;
 Built from commit &lt;code&gt;&lt;a href="https://github.com/lakpriya1s/kinterm/commit/7ba8573f6e6155df6eea6b98477ce112d201163a"&gt;7ba8573f6&lt;/a&gt;&lt;/code&gt;
@@ -143,4 +134,13 @@ on 2026-11-17.
 &lt;p&gt;
 See what's new in the &lt;a href="https://github.com/lakpriya1s/kinterm/releases/tag/kinterm-v0.8.0"&gt;release notes&lt;/a&gt;.
 &lt;/p&gt;
-</description><enclosure url="https://github.com/lakpriya1s/kinterm/releases/download/kinterm-v0.8.0/KinTerm.dmg" type="application/octet-stream" sparkle:edSignature="ydEc5d6e2g+nbIn7Ka8m4+6K6ZPHTFZmkO7sY0MPBYOiLz9y5opFkX3ixGA/1toSwrVOTbJDHPBx6AwstH/TDA==" length="198655115" /></item></channel></rss>
+</description><enclosure url="https://github.com/lakpriya1s/kinterm/releases/download/kinterm-v0.8.0/KinTerm.dmg" type="application/octet-stream" sparkle:edSignature="ydEc5d6e2g+nbIn7Ka8m4+6K6ZPHTFZmkO7sY0MPBYOiLz9y5opFkX3ixGA/1toSwrVOTbJDHPBx6AwstH/TDA==" length="198655115" /></item><item><title>KinTerm 0.9.0</title><pubDate>Thu, 19 Nov 2026 03:06:55 +0000</pubDate><sparkle:version>202611190301</sparkle:version><sparkle:shortVersionString>0.9.0</sparkle:shortVersionString><sparkle:minimumSystemVersion>13.0.0</sparkle:minimumSystemVersion><sparkle:fullReleaseNotesLink>https://github.com/lakpriya1s/kinterm/releases/tag/kinterm-v0.9.0</sparkle:fullReleaseNotesLink><description>
+&lt;h1&gt;KinTerm 0.9.0&lt;/h1&gt;
+&lt;p&gt;
+Built from commit &lt;code&gt;&lt;a href="https://github.com/lakpriya1s/kinterm/commit/d07c9a90faeb58784074b603cdfd37faf2f472e1"&gt;d07c9a90f&lt;/a&gt;&lt;/code&gt;
+on 2026-11-19.
+&lt;/p&gt;
+&lt;p&gt;
+See what's new in the &lt;a href="https://github.com/lakpriya1s/kinterm/releases/tag/kinterm-v0.9.0"&gt;release notes&lt;/a&gt;.
+&lt;/p&gt;
+</description><enclosure url="https://github.com/lakpriya1s/kinterm/releases/download/kinterm-v0.9.0/KinTerm.dmg" type="application/octet-stream" sparkle:edSignature="XJRkF5uahuckqyAA5/SVlBiJhLCwfDaoH/cUumsj6Wr1G9C3JpgxN3VO7R/96Vt4d4lgSOQwoEGfRYNfe5QpAw==" length="199162209" /></item></channel></rss>
