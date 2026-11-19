@@ -85,6 +85,13 @@ internals keep their names so upstream merges still work:
 - Tab bar buttons (`AgentPanelButtons` in `AgentTabBar.swift`): Grid,
   Review and Browser pinned to the bar's far end, lit while open; Review's
   badge is the change count of a review already opened in that tab.
+  `KeepAwakeBarButton` beside them is a cup, lit while the Mac is kept awake.
+- Keep Mac Awake (`Features/Keep Awake/`, ⌥⌘K): a power assertion while
+  agents work (plus a grace period), on a timer, until turned off, or until
+  one terminal's command or agent turn ends (a hold). In the tab bar, the
+  menu bar (always, outlined when off), View and dock menus, the command
+  palette, terminal and tab right-click menus; agents use `kinterm-ctl
+  awake`, `keep_awake` and `run --keep-awake`.
 - Code Review (`Features/Code Review/`, ⌘⇧R): diffs of the focused tab's
   repository beside the terminal, in a window, or as a grid tile. Design:
   [designs/08-code-review.md](designs/08-code-review.md). Changes as a list
@@ -257,6 +264,7 @@ Claude Code hook ──OSC 7501 (state, account, context, last)─────�
 | Agents drive KinTerm | `Features/Control/KinTermControl.swift` (commands on the browser socket; `AgentWorkers` registry of tabs and panes agents started), `Features/Control/ControlPeer.swift` (proves which terminal a request came from), `Features/Browser/BrowserControlServer.swift` (routes them), `Browser/bin/kinterm-ctl` (CLI, POSIX sh + JXA) and `kinterm-ctl-mcp.mjs` (the `kinterm` MCP server), `Ghostty.App.swift` (`commandFinished` settles workers whose command exited), `BrowserAgentInstaller.swift` (registers it); `run` panes open as a strip below (`AgentWorkers.stripFraction`) unless given a side |
 | Hidden panes | `Features/Splits/HiddenPanes.swift` (right-click › Hide Pane takes a pane out of the splits and keeps it running; Show "name" puts it back; `allSurfaces` includes them for agents, logs and port detection), `SplitTree.swift` (`parentSplit(of:)`) |
 | What opens after a turn | `Features/Agent Tabs/AgentAutoOpen.swift` (Markdown, review, dev server, per tab), `Features/Code Review/ReviewModel.swift` (`ReviewSnapshots`: snapshots, when each tab's agent works and which files its `Edit`/`Write` status names; `ReviewAttribution` decides whose a changed file is, so another tab's agent's files open in its own tab) |
+| Keep Mac Awake | `Features/Keep Awake/KeepAwake.swift` (what keeps the Mac awake, the IOPM assertion, battery guard, holds, notifications, menus), `KeepAwakeCard.swift` (menu bar card), `KeepAwakeTabMenu.swift` (tab right-click, command palette); menu bar cup in `AgentSummary.swift`, holds end in `Ghostty.App.swift`'s command finished; `keep-awake` in `KinTermControl.swift` |
 | Markdown Viewer | `Features/Markdown Viewer/MarkdownRenderer.swift` (GitHub-flavored Markdown → HTML, code colored by `ReviewHighlighter`, local images embedded), `MarkdownViewerModel.swift` (file list from `git ls-files`, watches the open file, marks what a turn changed against its text before the turn: `MarkdownLineChanges`, snapshot's commit or kept copy of untracked Markdown), `MarkdownViewerView.swift` (sidebar, hidden by default beside the terminal; changes control; WebKit page), `MarkdownViewerCenter.swift` (beside the terminal, grid tiles, popped-out windows, ⌘⇧M, ⌘-clicked `.md` paths); `kinterm-ctl markdown` via `KinTermControl.swift` |
 | Dev | `scripts/dev-run.sh` (strips `CLAUDE*` from the app's environment) |
 

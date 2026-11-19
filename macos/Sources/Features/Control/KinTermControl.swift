@@ -16,7 +16,7 @@ import Foundation
 enum KinTermControl {
     static let commands: Set<String> = [
         "spawn", "workers", "read", "send", "kill", "release",
-        "scrollback", "notify", "set-status", "review", "markdown",
+        "scrollback", "notify", "set-status", "review", "markdown", "keep-awake",
     ]
 
     /// At most this many workers per terminal, so a runaway loop can't
@@ -49,7 +49,14 @@ enum KinTermControl {
         switch command {
         case "spawn":
             switch workers.spawn(request, from: caller, in: controller) {
-            case .success(let made): reply["worker"] = made.summary
+            case .success(let made):
+                reply["worker"] = made.summary
+                // Keep the Mac awake until its command (or its agent's turn)
+                // finishes.
+                if request["keepAwake"] as? Bool == true, let surface = made.surface {
+                    KeepAwake.shared.hold(
+                        surface, reason: made.name, source: made.kind == .pane ? .pane : .agent)
+                }
             case .failure(let error): return fail(error.message)
             }
 
@@ -122,6 +129,43 @@ enum KinTermControl {
             case .missing: return fail("There's nothing at \(path).")
             case .notMarkdown: return fail("\(path) isn't a Markdown file (.md, .markdown, .mdx).")
             }
+
+        case "keep-awake":
+            let awake = KeepAwake.shared
+            switch request["action"] as? String ?? "on" {
+            case "on":
+                // Until this terminal's agent ends its turn or its command
+                // exits, and not past `minutes` (two hours unless asked, at
+                // most twelve), so a forgotten request can't keep the Mac up
+                // for good.
+                let asked = (request["minutes"] as? Int).flatMap { $0 > 0 ? $0 : nil }
+                let minutes = min(asked ?? 120, 12 * 60)
+                let reason = (request["reason"] as? String)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .flatMap { $0.isEmpty ? nil : String($0.prefix(60)) }
+                // From a plain shell, a time asked for is a timer: there's no
+                // turn to end, and the command that asked ends right away.
+                let agent = caller.programStatus != nil
+                awake.hold(
+                    caller, reason: reason, source: .agent, minutes: minutes,
+                    endsWithCommand: agent || asked == nil)
+            case "off":
+                awake.release(caller)
+            case "status":
+                break
+            default:
+                return fail("Keep awake takes on, off or status.")
+            }
+            var status = awake.summary
+            if let hold = awake.hold(for: caller) {
+                status["thisTerminal"] = hold.reason
+                status["thisTerminalText"] = KeepAwake.describe(hold)
+                status["thisTerminalTimer"] = !hold.endsWithCommand
+                if let expires = hold.expires {
+                    status["thisTerminalUntil"] = ISO8601DateFormatter().string(from: expires)
+                }
+            }
+            reply["keepAwake"] = status
 
         default:
             return fail("Unknown command \(command).")

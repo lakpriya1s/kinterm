@@ -80,6 +80,23 @@ With the `kinterm` MCP server connected, the same is `run`, `logs` and
   your tab. Claude Code and Codex with KinTerm's hooks already report
   this, so only use it if yours doesn't.
 
+## Keep the Mac awake for long work
+
+The user may walk away during a long build, test run, migration or
+download, and the Mac may go to sleep partway through. KinTerm can keep it awake:
+
+```sh
+kinterm-ctl awake --for 90m "full test suite"   # until your turn ends or your command exits; 2h at most unless --for (up to 12h)
+kinterm-ctl awake off                            # done early
+kinterm-ctl awake status                         # what keeps the Mac awake now
+kinterm-ctl run --keep-awake --name build -- 'make release'   # awake until that pane's command exits
+```
+
+With the MCP server: `keep_awake` (`action`, `minutes`, `reason`), and
+`run` with `keepAwake: true`. Many users already keep the Mac awake while
+agents work, so only ask for this when something will run long. Don't use
+`--keep-awake` on dev servers or watchers: they never exit.
+
 ## Hand changes over for review
 
 The user reviews your changes in KinTerm with ⌘⇧R (Review Changes): diffs

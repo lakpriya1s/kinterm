@@ -1677,10 +1677,41 @@ extension Ghostty {
             item.setImageIfDesired(systemSymbolName: "pencil.line")
             item = menu.addItem(withTitle: "Change Terminal Title...", action: #selector(changeTitle(_:)), keyEquivalent: "")
 
+            // Keep the Mac awake until what runs here finishes.
+            MainActor.assumeIsolated {
+                menu.addItem(.separator())
+                let awake = KeepAwake.shared
+                if let hold = awake.hold(for: self) {
+                    let item = menu.addItem(
+                        withTitle: "Stop Keeping Mac Awake for This",
+                        action: #selector(keepAwakeRelease(_:)),
+                        keyEquivalent: "")
+                    item.target = self
+                    item.toolTip = "Keeping the Mac awake until \(hold.reason) finishes."
+                    item.setImageIfDesired(systemSymbolName: "cup.and.saucer.fill")
+                } else if KeepAwake.isBusy(self) {
+                    let item = menu.addItem(
+                        withTitle: "Keep Mac Awake Until This Finishes",
+                        action: #selector(keepAwakeUntilFinished(_:)),
+                        keyEquivalent: "")
+                    item.target = self
+                    item.setImageIfDesired(systemSymbolName: "cup.and.saucer")
+                }
+                menu.addItem(awake.menuItem(surface: self))
+            }
+
             return menu
         }
 
         // MARK: Menu Handlers
+
+        @IBAction func keepAwakeUntilFinished(_ sender: Any?) {
+            MainActor.assumeIsolated { _ = KeepAwake.shared.hold(self) }
+        }
+
+        @IBAction func keepAwakeRelease(_ sender: Any?) {
+            MainActor.assumeIsolated { KeepAwake.shared.release(self) }
+        }
 
         @IBAction func copy(_ sender: Any?) {
             guard let surface = self.surface else { return }

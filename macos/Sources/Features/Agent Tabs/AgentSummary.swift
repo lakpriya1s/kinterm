@@ -48,6 +48,7 @@ final class AgentSummary: NSObject, NSMenuDelegate {
             .sink { [weak self] in self?.update() }
             .store(in: &cancellables)
         addViewMenuItem()
+        MainActor.assumeIsolated { KeepAwake.shared.start() }
         update()
     }
 
@@ -96,7 +97,26 @@ final class AgentSummary: NSObject, NSMenuDelegate {
         view.addItem(menuBar)
 
         view.addItem(AgentSounds.shared.menuItem())
+
+        // Keep Mac Awake, with a shortcut that turns it on until turned off,
+        // or off again.
+        MainActor.assumeIsolated {
+            view.addItem(.separator())
+            let toggle = NSMenuItem(
+                title: "Keep Mac Awake Now",
+                action: #selector(KeepAwake.toggleFromMenu(_:)),
+                keyEquivalent: "k")
+            toggle.keyEquivalentModifierMask = [.command, .option]
+            toggle.target = KeepAwake.shared
+            toggle.setImageIfDesired(systemSymbolName: "cup.and.saucer.fill")
+            keepAwakeToggle = toggle
+            view.addItem(toggle)
+            view.addItem(KeepAwake.shared.menuItem())
+        }
     }
+
+    /// "Keep Mac Awake Now" in the View menu, checked while it's on by hand.
+    private var keepAwakeToggle: NSMenuItem?
 
     /// Hidden, Full, Compact, Icon Only. `tracked` items get their check mark
     /// kept up to date; the summary's own menu is rebuilt on every update.
@@ -161,6 +181,10 @@ final class AgentSummary: NSObject, NSMenuDelegate {
         for (item, style) in faceStyleItems {
             item.state = settings.faceStyle == style ? .on : .off
         }
+        MainActor.assumeIsolated {
+            let awake = KeepAwake.shared
+            keepAwakeToggle?.state = awake.manualUntil != nil || !awake.holds.isEmpty ? .on : .off
+        }
         updateStatusItem()
     }
 
@@ -201,10 +225,18 @@ final class AgentSummary: NSObject, NSMenuDelegate {
 
     // MARK: Menu bar
 
+    /// Whether the menu bar shows the cup: always, unless turned off in its
+    /// options. Outlined while off, filled while keeping the Mac awake.
+    private var showsKeepAwake: Bool {
+        MainActor.assumeIsolated { KeepAwake.shared.showsInMenuBar }
+    }
+
     private func updateStatusItem() {
         guard !statusMenuOpen else { return }
         let settings = AgentTabBarSettings.shared
-        guard settings.showsMenuBarSummary, !entries.isEmpty else {
+        let showsAgents = settings.showsMenuBarSummary && !entries.isEmpty
+        let showsCup = showsKeepAwake
+        guard showsAgents || showsCup else {
             if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
             statusItem = nil
             return
@@ -212,8 +244,36 @@ final class AgentSummary: NSObject, NSMenuDelegate {
 
         let item = statusItem ?? NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
-        item.button?.attributedTitle = title(style: settings.menuBarStyle)
-        item.button?.toolTip = title(style: .full).string
+        let title = NSMutableAttributedString()
+        let font = NSFont.menuBarFont(ofSize: 0)
+        var tip: [String] = []
+        if showsCup {
+            let awake = MainActor.assumeIsolated { KeepAwake.shared }
+            let (countdown, headline, detail, stopped) = MainActor.assumeIsolated {
+                (awake.menuBarCountdown, awake.headline, awake.detail, awake.stoppedForBattery)
+            }
+            let holding = MainActor.assumeIsolated { awake.isHolding }
+            let symbol = holding && !stopped ? "cup.and.saucer.fill" : "cup.and.saucer"
+            item.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: headline)
+            item.button?.image?.isTemplate = true
+            item.button?.imagePosition = .imageLeading
+            if let countdown {
+                title.append(NSAttributedString(string: " \(countdown)", attributes: [.font: font]))
+            }
+            tip.append([headline, detail].compactMap { $0 }.joined(separator: ": "))
+        } else {
+            item.button?.image = nil
+        }
+        if showsAgents {
+            if title.length > 0 || showsCup {
+                title.append(NSAttributedString(string: "  ", attributes: [.font: font]))
+            }
+            title.append(self.title(style: settings.menuBarStyle))
+            tip.insert(self.title(style: .full).string, at: 0)
+        }
+        item.button?.attributedTitle = title
+        item.button?.imagePosition = title.length == 0 ? .imageOnly : .imageLeading
+        item.button?.toolTip = tip.joined(separator: "\n")
         if item.menu !== statusMenu { item.menu = statusMenu }
     }
 
@@ -287,6 +347,27 @@ final class AgentSummary: NSObject, NSMenuDelegate {
             row.view = view
             menu.addItem(row)
         }
+        if !entries.isEmpty { menu.addItem(.separator()) }
+
+        // Keep Mac Awake: what it's doing, and its choices. Inline when
+        // that's all the item is for, a submenu under the agents otherwise.
+        MainActor.assumeIsolated {
+            let awake = KeepAwake.shared
+            let row = NSMenuItem()
+            let view = NSHostingView(rootView: KeepAwakeCard(
+                headline: awake.headline, detail: awake.detail,
+                holding: awake.isHolding, stopped: awake.stoppedForBattery))
+            view.setFrameSize(view.fittingSize)
+            row.view = view
+            menu.addItem(row)
+            if entries.isEmpty {
+                menu.addItem(.separator())
+                awake.addChoices(to: menu, surface: nil)
+            } else {
+                menu.addItem(awake.menuItem())
+            }
+        }
+
         menu.addItem(.separator())
         let style = NSMenuItem(title: "Menu Bar Style", action: nil, keyEquivalent: "")
         style.submenu = menuBarMenu(tracked: false)

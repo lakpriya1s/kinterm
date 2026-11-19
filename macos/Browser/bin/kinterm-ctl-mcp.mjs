@@ -131,6 +131,10 @@ const tools = [
           enum: ["right", "down", "left", "up"],
           description: "Put the pane on this side, at half the terminal. Leave out for a small strip below.",
         },
+        keepAwake: {
+          type: "boolean",
+          description: "Keep the Mac from sleeping until this command exits. For long builds or test runs, not dev servers.",
+        },
       },
       required: ["command"],
     },
@@ -142,6 +146,7 @@ const tools = [
         command: a.command,
         cwd: a.cwd ?? process.cwd(),
         direction: a.direction ?? "",
+        keepAwake: a.keepAwake === true,
       });
       return `Started pane ${reply.worker.name}. Read its output with logs(name: "${reply.worker.name}").`;
     },
@@ -189,6 +194,35 @@ const tools = [
     async call(a) {
       await ask({ cmd: "set-status", state: a.state, msg: a.message ?? "" });
       return "Status set.";
+    },
+  },
+  {
+    name: "keep_awake",
+    description:
+      "Keep the user's Mac from going to sleep while you do something long the user may walk away from " +
+      "(a long build, test run, migration, download). It lasts until your turn ends or your command exits, " +
+      "and at most `minutes` (default 120, up to 720). `off` stops it; `status` says what keeps the Mac awake. " +
+      "The user may already keep it awake while agents work, so you don't need this for ordinary turns.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["on", "off", "status"], description: "Default: on." },
+        minutes: num("At most this long (default 120, up to 720)."),
+        reason: str("A few words on what for, shown to the user (e.g. 'full test suite')."),
+      },
+    },
+    async call(a) {
+      const reply = await ask({
+        cmd: "keep-awake",
+        action: a.action ?? "on",
+        minutes: a.minutes ?? 0,
+        reason: a.reason ?? "",
+      });
+      const s = reply.keepAwake ?? {};
+      const lines = [s.awake ? "The Mac is being kept awake." : s.stoppedForBattery ? "Stopped on battery." : "The Mac isn't being kept awake."];
+      for (const r of s.reasons ?? []) lines.push("- " + r);
+      if (s.thisTerminalText) lines.push(`For you: ${s.thisTerminalText}${s.thisTerminalUntil ? ` (at most until ${s.thisTerminalUntil})` : ""}.`);
+      return lines.join("\n");
     },
   },
   {
