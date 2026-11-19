@@ -2,15 +2,21 @@
 # kinterm-ctl: control KinTerm from the terminal you're in, by hand or from an agent.
 #
 #   Your terminal
-#     kinterm-ctl run [--name N] [--right|--down|--left|--up] [--cwd DIR] -- CMD...
+#     kinterm-ctl run [--name N] [--right|--down|--left|--up] [--cwd DIR] [--keep-awake] -- CMD...
 #                                 run CMD in a new pane (a dev server, tests): a strip a few
-#                                 lines tall under this one, or half of it on the side given
+#                                 lines tall under this one, or half of it on the side given;
+#                                 --keep-awake keeps the Mac awake until CMD exits
 #     kinterm-ctl logs NAME [--lines N]   what a pane started with `run` shows
 #     kinterm-ctl status STATE [MSG]      show STATE on this tab: idle working done blocked error clear
 #     kinterm-ctl notify [--title T] MSG  a notification that leads back to this terminal
 #     kinterm-ctl review [FILE...]        open the review (⌘⇧R) at FILE's changes
 #     kinterm-ctl markdown [FILE|DIR]     show a Markdown file (or a folder's) in the Markdown Viewer
 #     kinterm-ctl scrollback [--lines N]  this terminal's own text
+#     kinterm-ctl awake [--for 90m|2h] [REASON]
+#                                 keep the Mac awake: for an agent, until its turn ends (2h at
+#                                 most unless --for, up to 12h); typed at a prompt, for --for,
+#                                 or through the next command
+#     kinterm-ctl awake off|status        stop that, or see what keeps the Mac awake
 #
 #   Agents in other tabs (only the ones this terminal started)
 #     kinterm-ctl agent spawn [--name N] [--cwd DIR] [--worktree] [--allow-spawn] -- CMD...
@@ -56,7 +62,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 # JSON in and out with JavaScript for Automation: on every Mac, and it
@@ -156,7 +162,7 @@ make_worktree() {
 spawn() {
   kind=$1
   shift
-  name="" cwd="" direction="" worktree=false allow=false
+  name="" cwd="" direction="" worktree=false allow=false awake=false
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --name) name=${2:-}; shift 2 ;;
@@ -166,6 +172,7 @@ spawn() {
       --right | --down | --left | --up) direction=${1#--}; shift ;;
       --worktree) worktree=true; shift ;;
       --allow-spawn) allow=true; shift ;;
+      --keep-awake) awake=true; shift ;;
       --) shift; break ;;
       -*) die "unknown option $1" ;;
       *) break ;;
@@ -179,7 +186,7 @@ spawn() {
   [ -n "$cwd" ] || cwd=$PWD
   command=$(join_command "$@")
   worker=$(call "$(obj cmd spawn kind "$kind" name "$name" cwd "$cwd" command "$command" \
-    direction "$direction" allowSpawn "=$allow")" worker)
+    direction "$direction" allowSpawn "=$allow" keepAwake "=$awake")" worker)
   # Its name, for the commands that follow.
   js 'return JSON.parse(argv[0]).name' "$worker"
 }
@@ -306,6 +313,49 @@ case "$command" in
       *) target="$PWD/${target#./}" ;;
     esac
     call "$(obj cmd markdown path "$target")"
+    ;;
+  awake | keep-awake)
+    case "${1:-on}" in
+      off | stop)
+        call '{"cmd":"keep-awake","action":"off"}' >/dev/null
+        echo "This terminal no longer keeps the Mac awake."
+        ;;
+      status)
+        status=$(call '{"cmd":"keep-awake","action":"status"}' keepAwake)
+        js '
+          const s = JSON.parse(argv[0]);
+          const lines = [s.awake ? "Keeping the Mac awake." : (s.stoppedForBattery ? "Stopped on battery." : "Not keeping the Mac awake.")];
+          for (const r of s.reasons) lines.push("  " + r);
+          if (s.thisTerminalText) lines.push("This terminal: " + s.thisTerminalText + ".");
+          lines.push("While agents work: " + (s.whileAgentsWork ? "on" : "off") + ". Display: " + (s.keepDisplayOn ? "kept on" : "can sleep") + ".");
+          return lines.join("\n");
+        ' "$status"
+        ;;
+      *)
+        [ "${1:-}" = on ] && shift
+        minutes=0
+        if [ "${1:-}" = --for ]; then
+          spec=${2:-}
+          case "$spec" in
+            *h) n=${spec%h}; mult=60 ;;
+            *m) n=${spec%m}; mult=1 ;;
+            *) n=$spec; mult=1 ;;
+          esac
+          case "$n" in
+            "" | *[!0-9]*) die "--for takes minutes: 30, 90m or 2h." ;;
+          esac
+          minutes=$((n * mult))
+          shift 2
+        fi
+        call "$(obj cmd keep-awake action on minutes "=$minutes" reason "$*")" >/dev/null
+        call '{"cmd":"keep-awake","action":"status"}' keepAwake | js '
+          const s = JSON.parse(argv[0]);
+          const until = s.thisTerminalUntil ? new Date(s.thisTerminalUntil).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"}) : "";
+          if (s.thisTerminalTimer) return "Keeping the Mac awake until " + until + ".";
+          return "Keeping the Mac awake until " + (s.thisTerminal || "this") + " finishes" + (until ? ", " + until + " at the latest" : "") + ".";
+        ' "$(cat)"
+        ;;
+    esac
     ;;
   scrollback)
     lines=200

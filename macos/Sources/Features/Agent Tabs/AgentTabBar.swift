@@ -602,6 +602,7 @@ struct AgentTabBar: View {
                     model.toggleGrid()
                 }
             }
+            KeepAwakeBarButton(controller: model.terminalController, size: (slot * 0.7).rounded())
             AgentPanelButtons(controller: model.terminalController, size: (slot * 0.7).rounded())
         }
     }
@@ -941,6 +942,36 @@ private struct AgentBarButton: View {
     }
 }
 
+/// Keep Mac Awake in the bar: a cup, lit while it keeps the Mac awake.
+/// Clicking it opens its menu, with "Until This Finishes" for this tab.
+private struct KeepAwakeBarButton: View {
+    let controller: BaseTerminalController?
+    let size: CGFloat
+
+    @ObservedObject private var awake = KeepAwake.shared
+
+    var body: some View {
+        AgentBarButton(
+            symbol: awake.isHolding ? "cup.and.saucer.fill" : "cup.and.saucer",
+            size: size,
+            active: awake.isHolding,
+            badge: nil,
+            help: help
+        ) {
+            let menu = NSMenu()
+            menu.autoenablesItems = false
+            let surface = controller?.focusedSurface
+            awake.fill(menu, surface: surface.flatMap { KeepAwake.isBusy($0) || awake.hold(for: $0) != nil ? $0 : nil })
+            menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        }
+    }
+
+    private var help: String {
+        let detail = awake.detail.flatMap { $0.isEmpty ? nil : $0 }
+        return ["Keep Mac Awake: \(awake.headline)", detail].compactMap { $0 }.joined(separator: "\n")
+    }
+}
+
 /// How many files the tab's review last found changed.
 private struct AgentChangeBadge: View {
     @ObservedObject var model: ReviewModel
@@ -1091,6 +1122,10 @@ private struct AgentTabButton: View {
             Button("Rename Tab…") { model.rename(tab) }
             if let window = model.terminalWindow(for: tab) {
                 AgentTabColorMenu(window: window)
+            }
+            if let window = model.terminalWindow(for: tab),
+               let controller = window.windowController as? BaseTerminalController {
+                KeepAwakeTabMenu(controller: controller)
             }
             Divider()
             Button("Close Tab") { model.close(tab) }

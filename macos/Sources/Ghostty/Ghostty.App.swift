@@ -550,6 +550,9 @@ extension Ghostty {
         func shouldPresentNotification(notification: UNNotification) -> Bool {
             let userInfo = notification.request.content.userInfo
 
+            // Keep Mac Awake's are about the whole app, not one terminal.
+            if userInfo[KeepAwake.notificationKey] as? Bool == true { return true }
+
             // We always require the notification to be attached to a surface.
             guard let uuidString = userInfo["surface"] as? String,
                   let uuid = UUID(uuidString: uuidString),
@@ -1675,6 +1678,8 @@ extension Ghostty {
                         context: nil, shells: nil, last: nil, id: nil))
                     // A worker another terminal waits on may be done.
                     AgentWorkers.shared.commandFinished(in: surfaceView, exitCode: Int(exitCode))
+                    // "Keep awake until this finishes" is done.
+                    KeepAwake.shared.commandFinished(in: surfaceView)
                 }
 
                 // Determine if we even care about command finish notifications

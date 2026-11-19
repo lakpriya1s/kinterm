@@ -79,7 +79,8 @@ struct TerminalCommandPaletteView: View {
         // Sort the rest. We replace ":" with a character that sorts before space
         // so that "Foo:" sorts before "Foo Bar:". Use sortKey as a tie-breaker
         // for stable ordering when titles are equal.
-        options.append(contentsOf: sortedTerminalPaletteOptions(jumpOptions + terminalOptions))
+        options.append(contentsOf: sortedTerminalPaletteOptions(
+            jumpOptions + terminalOptions + KeepAwakeCommands.options(for: surfaceView)))
         return options
     }
 

@@ -1185,6 +1185,8 @@ extension AppDelegate {
         dockMenu.removeAllItems()
         dockMenu.addItem(newWindow)
         dockMenu.addItem(newTab)
+        dockMenu.addItem(.separator())
+        MainActor.assumeIsolated { dockMenu.addItem(KeepAwake.shared.menuItem()) }
     }
 
     /// Setup all the images for our menu items.
