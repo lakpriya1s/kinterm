@@ -126,6 +126,13 @@ struct BrowserView: View {
                 active: page.picking
             ) { page.togglePicker() }
             BrowserButton(
+                symbol: page.capturingArea ? "viewfinder.rectangular" : "camera.viewfinder",
+                help: page.capturingArea
+                    ? "Stop Screenshot (Esc)"
+                    : "Screenshot an Area for the Agent: drag a box to add a picture of it to this tab's agent's prompt",
+                active: page.capturingArea
+            ) { page.toggleAreaCapture() }
+            BrowserButton(
                 symbol: page.devTools == nil ? "hammer" : "hammer.fill",
                 help: page.devTools == nil ? "DevTools: Elements, Console, Network… (⌥⌘I)" : "Close DevTools (⌥⌘I)"
             ) { page.toggleDevTools() }

@@ -56,6 +56,10 @@ final class BrowserPage: ObservableObject {
     @Published private(set) var picking = false
     private var pickNonce: String?
 
+    /// Whether you're dragging out an area to screenshot for the agent.
+    @Published private(set) var capturingArea = false
+    private var areaNonce: String?
+
     private var handle: UnsafeMutableRawPointer?
     private var closed = false
 
@@ -212,6 +216,7 @@ final class BrowserPage: ObservableObject {
             stopPicking()
             return
         }
+        stopPicking()
         let nonce = UUID().uuidString
         pickNonce = nonce
         picking = true
@@ -219,12 +224,57 @@ final class BrowserPage: ObservableObject {
         focus()
     }
 
+    /// Start dragging out an area of the page to screenshot for the tab's
+    /// agent, or stop.
+    func toggleAreaCapture() {
+        guard let handle else { return }
+        if capturingArea {
+            BrowserEngine.execute(handle, AreaCapture.cancelScript)
+            stopPicking()
+            return
+        }
+        stopPicking()
+        let nonce = UUID().uuidString
+        areaNonce = nonce
+        capturingArea = true
+        BrowserEngine.execute(handle, AreaCapture.startScript(nonce: nonce))
+        focus()
+    }
+
+    /// Stop picking elements and capturing an area. (The page's scripts
+    /// for both cancel each other.)
     private func stopPicking() {
         picking = false
         pickNonce = nil
+        capturingArea = false
+        areaNonce = nil
+    }
+
+    private func areaSelected(_ value: String, nonce: String) {
+        let json = Data(value.dropFirst(nonce.count + 1).utf8)
+        stopPicking()
+        guard let message = try? JSONDecoder().decode(AreaCapture.Message.self, from: json),
+              message.type == "area", let rect = message.rect, let targetID else { return }
+        Task { @MainActor [weak self] in
+            do {
+                let png = try await AreaCapture.screenshot(targetID: targetID, rect: rect)
+                let path = try AreaCapture.save(png)
+                guard let self else { return }
+                // Just the path, so the agent sees a pasted image file and
+                // attaches it; the trailing space is for what you type next.
+                BrowserCenter.shared.sendToAgent(path + " ", from: self)
+            } catch {
+                NSSound.beep()
+                Ghostty.logger.warning("browser area screenshot failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     private func picked(_ value: String) {
+        if let nonce = areaNonce, value.hasPrefix(nonce + ":") {
+            areaSelected(value, nonce: nonce)
+            return
+        }
         guard let nonce = pickNonce, value.hasPrefix(nonce + ":") else { return }
         let json = Data(value.dropFirst(nonce.count + 1).utf8)
         stopPicking()
@@ -281,7 +331,7 @@ final class BrowserPage: ObservableObject {
             if isLoading {
                 problem = nil
                 // A new document: the picker went with the old one.
-                if picking { stopPicking() }
+                if picking || capturingArea { stopPicking() }
             } else {
                 if agentActive { installAgentCursor() }
                 // DevTools docked before a move: back, on the new page.
