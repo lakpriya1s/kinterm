@@ -223,11 +223,48 @@ static void StartWatchdog() {
   [[NSRunLoop mainRunLoop] addTimer:g_watchdog forMode:NSRunLoopCommonModes];
 }
 
+// MARK: - Windows Chromium opens on its own
+
+// Chromium makes a browser in a Chrome window of its own when something
+// outside KinTerm asks for one: a DevTools client's Target.createTarget
+// (Playwright, Puppeteer, an agent's new_page) or Chrome's own new-window
+// commands. KinTerm shows pages only in its tabs, so these close as soon as
+// they're made, and their window with them. Without a client they'd stay,
+// unmanaged, and keep Chromium from shutting down until closed by hand.
+class KTStrayClient : public CefClient, public CefLifeSpanHandler {
+ public:
+  CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+
+  void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+    browser->GetHost()->CloseBrowser(true);
+    ScheduleWork(0);
+  }
+
+  // Nor windows of their own.
+  bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int popup_id,
+                     const CefString& target_url, const CefString& target_frame_name,
+                     WindowOpenDisposition target_disposition, bool user_gesture,
+                     const CefPopupFeatures& popupFeatures, CefWindowInfo& windowInfo,
+                     CefRefPtr<CefClient>& client, CefBrowserSettings& settings,
+                     CefRefPtr<CefDictionaryValue>& extra_info, bool* no_javascript_access) override {
+    return true;
+  }
+
+ private:
+  IMPLEMENT_REFCOUNTING(KTStrayClient);
+};
+
 // MARK: - App
 
 class KTApp : public CefApp, public CefBrowserProcessHandler {
  public:
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
+
+  // Browsers KinTerm didn't make; see KTStrayClient.
+  CefRefPtr<CefClient> GetDefaultClient() override {
+    static CefRefPtr<KTStrayClient> stray = new KTStrayClient();
+    return stray;
+  }
 
   void OnBeforeCommandLineProcessing(const CefString& process_type,
                                      CefRefPtr<CefCommandLine> command_line) override {
