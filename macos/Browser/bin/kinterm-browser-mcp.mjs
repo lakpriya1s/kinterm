@@ -344,7 +344,7 @@ const PAGE_TYPES = new Set(["page", "background_page", "webview", "app"]);
 /**
  * One Chrome DevTools MCP connection to the browser, filtered to this
  * agent's page: other pages aren't listed, can't be attached to, and their
- * events don't come through. Pages it opens itself (new_page) are its own.
+ * events don't come through. It can't open pages of its own (new_page).
  */
 function proxyBrowserConnection(path, tabPages, client, clientRest, upstream, upstreamRest) {
   const types = new Map(); // target id → type
@@ -432,7 +432,6 @@ function proxyBrowserConnection(path, tabPages, client, clientRest, upstream, up
           message.result.targetInfos = message.result.targetInfos.filter((info) => !isBlocked(info));
           return toClient(JSON.stringify(message));
         }
-        if (method === "Target.createTarget" && message.result?.targetId) own.add(message.result.targetId);
         return toClient(text);
       }
 
@@ -503,7 +502,25 @@ function proxyBrowserConnection(path, tabPages, client, clientRest, upstream, up
         );
       }
 
-      if (message.method === "Target.getTargets" || message.method === "Target.createTarget") {
+      // A new page (new_page): Chromium would open it in a window of its
+      // own, a bare Chrome window outside KinTerm that nothing closes. The
+      // agent has one page, in its tab; it loads other sites there.
+      if (message.method === "Target.createTarget") {
+        return toClient(
+          JSON.stringify({
+            id: message.id,
+            error: {
+              code: -32000,
+              message:
+                "KinTerm's browser has one page per tab, and this agent's is already open. " +
+                "Use navigate_page to load the URL in it instead of opening a new page.",
+            },
+            ...(message.sessionId ? { sessionId: message.sessionId } : {}),
+          }),
+        );
+      }
+
+      if (message.method === "Target.getTargets") {
         pending.set(message.id, message.method);
       }
 
