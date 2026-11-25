@@ -12,7 +12,8 @@
 // terminal that is), and Chrome DevTools MCP reaches Chromium through a
 // small proxy here that shows it that one page: other tabs' pages, and
 // KinTerm's own DevTools pages, aren't there for it. The proxy also moves
-// the agent's cursor on the page as the agent moves the mouse.
+// the agent's cursor on the page as the agent moves the mouse, and says
+// what it's doing.
 //
 // No dependencies besides Node 20+ and npx.
 
@@ -109,6 +110,62 @@ async function waitForBrowser(port) {
 
 /** Chromium's DevTools port, and the one page (target id) this agent gets. */
 const browser = { port: null, target: null };
+
+/**
+ * What the agent's cursor says it's doing: a word or two for the tool call
+ * in flight, shown in the tag under the cursor. `version` changes with each
+ * call, so each page connection passes the new one on once.
+ */
+const agentAction = { label: "Working", version: 0 };
+const ACTION_LABELS = {
+  click: "Clicking",
+  hover: "Hovering",
+  drag: "Dragging",
+  fill: "Typing",
+  fill_form: "Filling form",
+  type_text: "Typing",
+  press_key: "Pressing key",
+  upload_file: "Uploading",
+  handle_dialog: "Answering dialog",
+  navigate_page: "Navigating",
+  new_page: "Opening page",
+  select_page: "Switching page",
+  close_page: "Closing page",
+  wait_for: "Waiting",
+  take_snapshot: "Reading page",
+  take_screenshot: "Looking",
+  evaluate_script: "Running script",
+  emulate: "Emulating",
+  resize_page: "Resizing",
+  list_console_messages: "Reading console",
+  get_console_message: "Reading console",
+  list_network_requests: "Checking network",
+  get_network_request: "Checking network",
+  get_css_styles: "Inspecting styles",
+  performance_start_trace: "Recording",
+  performance_stop_trace: "Recording",
+  performance_analyze_insight: "Analyzing",
+  lighthouse_audit: "Auditing",
+  take_heapsnapshot: "Measuring memory",
+  screencast_start: "Recording",
+  screencast_stop: "Recording",
+  set_logpoints: "Setting logpoints",
+};
+
+function setAgentAction(tool) {
+  agentAction.label = ACTION_LABELS[tool] ?? "Working";
+  agentAction.version++;
+}
+
+/**
+ * How long the agent's cursor takes to glide `distance` pixels: quick for
+ * a nudge, under a second across the page. The mouse event waits this long
+ * before it reaches the page, so the click lands when the cursor does.
+ */
+function glideTime(distance) {
+  if (distance < 2) return 0;
+  return Math.round(Math.min(800, Math.max(260, 200 + distance * 0.55)));
+}
 
 // MARK: WebSocket frames
 //
@@ -354,6 +411,11 @@ function proxyBrowserConnection(path, tabPages, client, clientRest, upstream, up
   const pending = new Map(); // the client's request id → method
   const hidden = new Set(); // our own requests' ids
   let nextHiddenId = 2_000_000_000;
+  // Where this connection's agent cursor is, and the action each page
+  // session was last told about.
+  let pointerX = null;
+  let pointerY = null;
+  const toldAction = new Map(); // session id → agentAction.version
 
   const filtering = () => browser.target !== null;
 
@@ -481,8 +543,30 @@ function proxyBrowserConnection(path, tabPages, client, clientRest, upstream, up
   });
 
   // Chrome DevTools MCP → Chromium
+  // The client's messages go on in order, one after another: one may wait
+  // for the agent's cursor to get where it's going.
+  let clientQueue = Promise.resolve();
+
   const fromClient = new FrameReader({
     message(text) {
+      clientQueue = clientQueue.then(() => fromClientMessage(text)).catch(() => {});
+    },
+    close() {
+      clientQueue.then(() => {
+        upstream.end(encodeFrame(Buffer.alloc(0), 0x8, true));
+        client.end();
+      });
+    },
+    ping(payload) {
+      client.write(encodeFrame(payload, 0xa, false));
+    },
+  });
+
+  function pageEvaluate(expression, sessionId) {
+    hiddenRequest("Runtime.evaluate", { expression, silent: true }, sessionId);
+  }
+
+  async function fromClientMessage(text) {
       debug(">", text.slice(0, 300));
       let message;
       try {
@@ -507,30 +591,29 @@ function proxyBrowserConnection(path, tabPages, client, clientRest, upstream, up
         pending.set(message.id, message.method);
       }
 
-      // The agent's mouse: move its cursor on the page first, in order.
+      // A new tool call: tell the page what the agent is doing now.
+      if (message.sessionId && toldAction.get(message.sessionId) !== agentAction.version) {
+        toldAction.set(message.sessionId, agentAction.version);
+        pageEvaluate(`window.__kintermAgentAction && window.__kintermAgentAction(${JSON.stringify(agentAction.label)})`, message.sessionId);
+      }
+
+      // The agent's mouse: glide its cursor there on the page first, and
+      // let the event through when it arrives.
       if (message.method === "Input.dispatchMouseEvent" && message.sessionId && params.type !== "mouseReleased") {
         const x = Number(params.x) || 0;
         const y = Number(params.y) || 0;
+        // The first move comes in from wherever the page last put the cursor.
+        const ms = pointerX === null ? 450 : glideTime(Math.hypot(x - pointerX, y - pointerY));
+        pointerX = x;
+        pointerY = y;
         const type = JSON.stringify(String(params.type));
-        hiddenRequest(
-          "Runtime.evaluate",
-          {
-            expression: `window.__kintermAgentPointer && window.__kintermAgentPointer(${x}, ${y}, ${type})`,
-            silent: true,
-          },
-          message.sessionId,
-        );
+        pageEvaluate(`window.__kintermAgentPointer && window.__kintermAgentPointer(${x}, ${y}, ${type}, ${ms})`, message.sessionId);
+        if (ms) await sleep(ms);
+        // A beat for the press to show before the page reacts to it.
+        if (params.type === "mousePressed") await sleep(90);
       }
       toUpstream(text);
-    },
-    close() {
-      upstream.end(encodeFrame(Buffer.alloc(0), 0x8, true));
-      client.end();
-    },
-    ping(payload) {
-      client.write(encodeFrame(payload, 0xa, false));
-    },
-  });
+  }
 
   client.on("data", (chunk) => fromClient.push(chunk));
   upstream.on("data", (chunk) => fromUpstream.push(chunk));
@@ -767,6 +850,7 @@ async function handle(line) {
       reply(message.id, { content: [{ type: "text", text: String(error.message || error) }], isError: true });
       return;
     }
+    setAgentAction(message.params?.name);
     if (activeCalls.size === 0) ask({ cmd: "agent", active: true, target: browser.target ?? undefined }).catch(() => {});
     activeCalls.add(message.id);
   }
