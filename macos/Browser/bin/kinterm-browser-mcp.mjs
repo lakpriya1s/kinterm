@@ -152,8 +152,30 @@ const ACTION_LABELS = {
   set_logpoints: "Setting logpoints",
 };
 
-function setAgentAction(tool) {
-  agentAction.label = ACTION_LABELS[tool] ?? "Working";
+/**
+ * The optional argument every tool gets here: the agent's own words for
+ * what it's doing, shown under its cursor instead of the tool's. KinTerm
+ * takes it out before the call reaches Chrome DevTools MCP.
+ */
+const LABEL_ARGUMENT = "label";
+const LABEL_SCHEMA = {
+  type: "string",
+  description:
+    "2-3 words for the user watching, shown under your cursor on the page: what this step is for, " +
+    "e.g. \"Opening settings\", \"Adding to cart\", \"Checking login\". Optional.",
+};
+
+/** An agent's label, made short and plain: three words, 24 characters at most. */
+function cleanLabel(value) {
+  if (typeof value !== "string") return null;
+  let text = value.replace(/<[^>]*>/g, " ").replace(/[\u0000-\u001f\u007f<>`*_#]/g, " ").replace(/\s+/g, " ").trim();
+  text = text.split(" ").slice(0, 3).join(" ");
+  if (text.length > 24) text = text.slice(0, 23).trimEnd() + "…";
+  return text || null;
+}
+
+function setAgentAction(tool, label) {
+  agentAction.label = label ?? ACTION_LABELS[tool] ?? "Working";
   agentAction.version++;
 }
 
@@ -719,10 +741,22 @@ const INSTRUCTIONS =
   "Use it, not another browser tool (Playwright, a separate Chrome) or `open`, whenever you show the user a " +
   "web page or check one: a dev server, a local HTML file (serve its folder first), a site. Navigate, take a " +
   "snapshot, click and fill like a user, then read the console and network requests for errors. " +
-  "From a shell, `kinterm-browser open URL` opens a page without these tools.";
+  "From a shell, `kinterm-browser open URL` opens a page without these tools. " +
+  "Every tool takes an optional `label`: give it 2-3 words saying what the step is for (\"Opening settings\"), " +
+  "and the user sees them under your cursor.";
 
 let initializeMessage = null; // The client's, replayed when the child restarts.
 const hiddenIds = new Set(); // Replies to our replayed requests, not the client's.
+const toolListIds = new Set(); // The client's tools/list requests, whose replies get `label`.
+
+/** Adds the optional `label` argument to each tool in a tools/list reply. */
+function addLabelArgument(result) {
+  for (const tool of result?.tools ?? []) {
+    const schema = (tool.inputSchema ??= { type: "object" });
+    schema.properties ??= {};
+    schema.properties[LABEL_ARGUMENT] ??= LABEL_SCHEMA;
+  }
+}
 
 function startChild() {
   child = spawn(
@@ -741,6 +775,11 @@ function startChild() {
     try {
       const message = JSON.parse(line);
       if (message.id !== undefined && hiddenIds.delete(message.id)) return;
+      if (message.id !== undefined && toolListIds.delete(message.id) && message.result) {
+        addLabelArgument(message.result);
+        process.stdout.write(JSON.stringify(message) + "\n");
+        return;
+      }
       if (message.id !== undefined && activeCalls.delete(message.id) && activeCalls.size === 0) {
         ask({ cmd: "agent", active: false, target: browser.target ?? undefined }).catch(() => {});
       }
@@ -843,6 +882,7 @@ async function handle(line) {
     return;
   }
   if (message.method === "initialize") initializeMessage = message;
+  if (message.method === "tools/list" && message.id !== undefined) toolListIds.add(message.id);
   if (message.method === "tools/call") {
     try {
       await ensureBrowser();
@@ -850,7 +890,15 @@ async function handle(line) {
       reply(message.id, { content: [{ type: "text", text: String(error.message || error) }], isError: true });
       return;
     }
-    setAgentAction(message.params?.name);
+    // The agent's label is for KinTerm, not Chrome DevTools MCP, whose
+    // tools would reject an argument they don't know.
+    const args = message.params?.arguments;
+    let label = null;
+    if (args && typeof args === "object" && LABEL_ARGUMENT in args) {
+      label = cleanLabel(args[LABEL_ARGUMENT]);
+      delete args[LABEL_ARGUMENT];
+    }
+    setAgentAction(message.params?.name, label);
     if (activeCalls.size === 0) ask({ cmd: "agent", active: true, target: browser.target ?? undefined }).catch(() => {});
     activeCalls.add(message.id);
   }
