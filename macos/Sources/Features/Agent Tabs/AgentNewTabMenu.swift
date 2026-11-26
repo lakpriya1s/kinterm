@@ -177,11 +177,18 @@ enum AgentLauncher {
         }
     }
 
-    /// How many tabs, in every window, have an agent on this account.
+    /// How many open tabs, in every window, have a live agent on this
+    /// account. Like the Agents panel, it skips windows that are closed but
+    /// not yet released, and agents whose status was cleared; minimized
+    /// windows still count, since their agents are running.
     static func runningCount(for id: String) -> Int {
         NSApp.windows
+            .filter { $0.isVisible || $0.isMiniaturized }
             .compactMap { $0.windowController as? BaseTerminalController }
-            .filter { $0.programStatus?.account == id }
+            .filter { controller in
+                guard let status = controller.programStatus else { return false }
+                return status.account == id && status.state != .clear
+            }
             .count
     }
 
