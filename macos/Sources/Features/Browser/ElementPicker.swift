@@ -62,6 +62,7 @@ enum ElementPicker {
     private static let script = #"""
     (() => {
       if (window.__kintermPicker) window.__kintermPicker.cancel(true);
+      if (window.__kintermArea) window.__kintermArea.cancel(true);
       const nonce = "__NONCE__";
       const post = console.debug.bind(console);
       const send = (message) => post("__kintermPick:" + nonce + ":" + JSON.stringify(message));
