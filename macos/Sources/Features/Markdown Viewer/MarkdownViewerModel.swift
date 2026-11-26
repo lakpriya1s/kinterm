@@ -28,7 +28,7 @@ final class MarkdownViewerModel: ObservableObject {
         Mode(rawValue: UserDefaults.standard.string(forKey: "MarkdownViewerMode") ?? "") ?? .rendered {
         didSet {
             UserDefaults.standard.set(mode.rawValue, forKey: "MarkdownViewerMode")
-            if mode != oldValue { render(keepScroll: false) }
+            if mode != oldValue { selection = nil; render(keepScroll: false) }
         }
     }
 
@@ -67,7 +67,22 @@ final class MarkdownViewerModel: ObservableObject {
     /// A file whose first change to scroll to once it's rendered.
     private var revealing: URL?
 
-    private var text = ""
+    // Comments for the agent, and the picture being looked at closely. See
+    // MarkdownViewerComments.swift.
+
+    /// The text selected on the page, offered for a comment.
+    @Published var selection: MarkdownSelection?
+    /// The passage a comment is being written on.
+    @Published var composing: MarkdownSelection?
+    @Published var comments: [MarkdownComment] = []
+    /// Whether the comments waiting to be sent are listed.
+    @Published var showsComments = false
+    /// A picture on the page shown large.
+    @Published var zoomedImage: MarkdownImage?
+    /// The tab whose agent the comments go to.
+    weak var controller: BaseTerminalController?
+
+    private(set) var text = ""
     private var watcher: DispatchSourceFileSystemObject?
     private var reloadWork: DispatchWorkItem?
     private var listTask: Task<Void, Never>?
@@ -148,6 +163,9 @@ final class MarkdownViewerModel: ObservableObject {
 
     private func show(_ url: URL, anchor: String?) {
         current = url
+        selection = nil
+        composing = nil
+        zoomedImage = nil
         self.anchor = anchor
         load(keepScroll: false)
         watch(url)

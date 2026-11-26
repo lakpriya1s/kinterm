@@ -60,22 +60,25 @@ struct MarkdownViewerView: View {
                 changesControl
             }
 
-            Picker("", selection: $model.mode) {
-                Text("Rendered").tag(MarkdownViewerModel.Mode.rendered)
-                Text("Source").tag(MarkdownViewerModel.Mode.source)
+            // A narrow pane can't fit every control: the file actions fold
+            // into a menu first, then the mode switch drops its words, so
+            // the toolbar never spills past the pane's edges.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 2) {
+                    modePicker(compact: false)
+                    fileActionButtons
+                }
+                HStack(spacing: 2) {
+                    modePicker(compact: false)
+                    fileActionsMenu
+                }
+                HStack(spacing: 2) {
+                    modePicker(compact: true)
+                    fileActionsMenu
+                }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
-            .fixedSize()
-            .padding(.trailing, 4)
-            .help("Show the page rendered, or the Markdown as written")
+            .layoutPriority(1)
 
-            BrowserButton(symbol: "doc.on.doc", help: "Copy Path", enabled: model.current != nil) { model.copyPath() }
-            BrowserButton(symbol: "folder", help: "Show in Finder", enabled: model.current != nil) { model.revealInFinder() }
-            BrowserButton(symbol: "arrow.up.forward.app", help: "Open in Default App", enabled: model.current != nil) {
-                model.openInEditor()
-            }
             if let switchPlacement {
                 switch placement {
                 case .panel:
@@ -89,8 +92,61 @@ struct MarkdownViewerView: View {
             }
         }
         .padding(.horizontal, 6)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .frame(height: 34)
+        .clipped()
         .background(ReviewColors.surface)
+    }
+
+    private func modePicker(compact: Bool) -> some View {
+        Picker("", selection: $model.mode) {
+            if compact {
+                Image(systemName: "doc.richtext").tag(MarkdownViewerModel.Mode.rendered)
+                    .help("Rendered")
+                Image(systemName: "chevron.left.forwardslash.chevron.right").tag(MarkdownViewerModel.Mode.source)
+                    .help("Source")
+            } else {
+                Text("Rendered").tag(MarkdownViewerModel.Mode.rendered)
+                Text("Source").tag(MarkdownViewerModel.Mode.source)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+        .fixedSize()
+        .padding(.trailing, 4)
+        .help("Show the page rendered, or the Markdown as written")
+    }
+
+    private var fileActionButtons: some View {
+        HStack(spacing: 2) {
+            BrowserButton(symbol: "doc.on.doc", help: "Copy Path", enabled: model.current != nil) { model.copyPath() }
+            BrowserButton(symbol: "folder", help: "Show in Finder", enabled: model.current != nil) { model.revealInFinder() }
+            BrowserButton(symbol: "arrow.up.forward.app", help: "Open in Default App", enabled: model.current != nil) {
+                model.openInEditor()
+            }
+        }
+    }
+
+    /// The file actions, folded into one button for a narrow pane.
+    private var fileActionsMenu: some View {
+        Menu {
+            Button("Copy Path") { model.copyPath() }
+            Button("Show in Finder") { model.revealInFinder() }
+            Button("Open in Default App") { model.openInEditor() }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(ReviewColors.secondary)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(model.current == nil)
+        .help("File Actions")
+        .accessibilityLabel("File Actions")
     }
 
     /// What the agent changed: how many, stepping through them, and done.
@@ -129,7 +185,23 @@ struct MarkdownViewerView: View {
                 title: model.listing ? "Looking for Markdown files…" : "Pick a file to read",
                 detail: model.listing || !model.files.isEmpty ? "" : "No Markdown files in \(model.root.lastPathComponent).")
         } else {
-            MarkdownWebView(model: model)
+            VStack(spacing: 0) {
+                ZStack(alignment: .bottom) {
+                    MarkdownWebView(model: model)
+                    MarkdownCommentButton(model: model)
+                    if let target = model.composing {
+                        MarkdownCommentComposer(model: model, target: target)
+                            .id(target.text)
+                            .frame(maxWidth: 640)
+                    }
+                    if let image = model.zoomedImage {
+                        MarkdownImageViewer(image: image) { model.zoomedImage = nil }
+                    }
+                }
+                if !model.comments.isEmpty, model.zoomedImage == nil {
+                    MarkdownCommentsBar(model: model)
+                }
+            }
         }
     }
 
@@ -273,12 +345,17 @@ private struct MarkdownFileRow: View {
 // MARK: Page
 
 /// The page, in WebKit with page scripts off: Markdown can carry raw HTML,
-/// and none of it gets to run.
+/// and none of it gets to run. The viewer's own script runs apart from it.
 struct MarkdownWebView: NSViewRepresentable {
     @ObservedObject var model: MarkdownViewerModel
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         weak var model: MarkdownViewerModel?
+        weak var webView: WKWebView?
+        /// The commented lines marked on the page.
+        var markedComments: [ClosedRange<Int>] = []
+        /// The picture right-clicked, for the menu about to open.
+        var contextImage: MarkdownImage?
         var shownHTML = ""
         var shownFile: URL?
         var shownMode: MarkdownViewerModel.Mode?
@@ -312,9 +389,84 @@ struct MarkdownWebView: NSViewRepresentable {
                 model?.anchorShown()
                 scroll(webView, to: anchor)
             }
+            markedComments = model?.commentedLines ?? []
+            markComments(webView)
+        }
+
+        func markComments(_ webView: WKWebView) {
+            webView.evaluateJavaScript(
+                MarkdownPageScript.markComments(markedComments), in: nil, in: .defaultClient) { _ in }
+        }
+
+        // MARK: Messages from the page script
+
+        @MainActor
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard let body = message.body as? [String: Any], let type = body["type"] as? String,
+                  let model, let file = model.current else { return }
+            switch type {
+            case "selection":
+                let text = (body["text"] as? String) ?? ""
+                guard !text.isEmpty else {
+                    if model.selection != nil { model.selection = nil }
+                    return
+                }
+                let scale = webView?.magnification ?? 1
+                let start = (body["start"] as? NSNumber)?.intValue ?? 0
+                let end = (body["end"] as? NSNumber)?.intValue ?? 0
+                model.selection = MarkdownSelection(
+                    file: file,
+                    text: text,
+                    lines: start > 0 ? start...max(start, end) : nil,
+                    point: CGPoint(
+                        x: ((body["x"] as? NSNumber)?.doubleValue ?? 0) * scale,
+                        y: ((body["y"] as? NSNumber)?.doubleValue ?? 0) * scale))
+            case "image":
+                if let image = Self.image(body) { model.zoomedImage = image }
+            case "context":
+                contextImage = Self.image(body)
+            default:
+                break
+            }
+        }
+
+        private static func image(_ body: [String: Any]) -> MarkdownImage? {
+            guard let src = body["src"] as? String, !src.isEmpty, let url = URL(string: src) else { return nil }
+            return MarkdownImage(url: url, alt: (body["alt"] as? String) ?? "")
+        }
+
+        /// The viewer's own right-click items: on a picture, and on a
+        /// selection.
+        @MainActor
+        func menuItems() -> [NSMenuItem] {
+            var items: [NSMenuItem] = []
+            if let image = contextImage {
+                contextImage = nil
+                items.append(MarkdownMenuItem("Zoom Image", symbol: "plus.magnifyingglass") { [weak self] in
+                    self?.model?.zoomedImage = image
+                })
+                if image.url.isFileURL {
+                    items.append(MarkdownMenuItem("Open Image in Default App", symbol: "arrow.up.forward.app") {
+                        NSWorkspace.shared.open(image.url)
+                    })
+                    items.append(MarkdownMenuItem("Show Image in Finder", symbol: "folder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([image.url])
+                    })
+                }
+            }
+            if model?.selection != nil {
+                items.append(MarkdownMenuItem("Comment on Selection…", symbol: "text.bubble") { [weak self] in
+                    self?.model?.startComment()
+                })
+            }
+            return items
         }
 
         func scroll(_ webView: WKWebView, to fragment: String) {
+            if fragment.hasPrefix("kt-line-"), let line = Int(fragment.dropFirst("kt-line-".count)) {
+                webView.evaluateJavaScript(MarkdownPageScript.scroll(toLine: line))
+                return
+            }
             let id = (fragment.removingPercentEncoding ?? fragment)
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "'", with: "\\'")
@@ -337,7 +489,19 @@ struct MarkdownWebView: NSViewRepresentable {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = false
         config.websiteDataStore = .nonPersistent()
-        let view = WKWebView(frame: .zero, configuration: config)
+        // The viewer's own script, apart from the page's (which stay off):
+        // selections to comment on, and pictures to zoom.
+        let content = WKUserContentController()
+        content.addUserScript(WKUserScript(
+            source: MarkdownPageScript.source, injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true, in: .defaultClient))
+        content.add(MarkdownScriptProxy(context.coordinator), contentWorld: .defaultClient, name: MarkdownPageScript.handler)
+        config.userContentController = content
+        let view = MarkdownPageView(frame: .zero, configuration: config)
+        view.extraMenuItems = { [weak coordinator = context.coordinator] in
+            MainActor.assumeIsolated { coordinator?.menuItems() ?? [] }
+        }
+        context.coordinator.webView = view
         view.navigationDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
         view.allowsMagnification = true
@@ -363,9 +527,20 @@ struct MarkdownWebView: NSViewRepresentable {
             } else {
                 view.loadHTMLString(html, baseURL: file)
             }
-        } else if let anchor = model.anchor {
-            model.anchorShown()
-            coordinator.scroll(view, to: anchor)
+        } else {
+            if let anchor = model.anchor {
+                model.anchorShown()
+                coordinator.scroll(view, to: anchor)
+            }
+            let commented = model.commentedLines
+            if commented != coordinator.markedComments {
+                coordinator.markedComments = commented
+                coordinator.markComments(view)
+            }
         }
+    }
+
+    static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
+        view.configuration.userContentController.removeAllScriptMessageHandlers()
     }
 }

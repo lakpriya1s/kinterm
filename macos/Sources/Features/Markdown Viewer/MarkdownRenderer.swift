@@ -67,7 +67,7 @@ enum MarkdownRenderer {
                 }
             }
             n += 1
-            rows += "<tr\(attrs)><td class=\"ln\">\(n)</td><td>\(escape(line))</td></tr>\n"
+            rows += "<tr\(attrs) data-kt-line=\"\(n)-\(n)\"><td class=\"ln\">\(n)</td><td>\(escape(line))</td></tr>\n"
         }
         let html = """
         <!doctype html>
@@ -156,7 +156,11 @@ enum MarkdownRenderer {
         th, td { padding: 6px 13px; border: 1px solid \(hex(ReviewColors.border)); }
         th { font-weight: 600; background: \(hex(ReviewColors.surface)); }
         tr:nth-child(2n) td { background: \(hex(ReviewColors.card)); }
-        img { max-width: 100%; }
+        img { max-width: 100%; cursor: zoom-in; }
+        a img { cursor: pointer; }
+        .kt-commented { box-shadow: -10px 0 0 -7px rgba(210, 153, 34, 0.9); }
+        tr.kt-commented td { background: rgba(210, 153, 34, 0.14) !important; box-shadow: none; }
+        tr.kt-commented { box-shadow: none; }
         del { color: \(hex(ReviewColors.secondary)); }
         kbd { padding: 0.15em 0.4em; font: 11px ui-monospace, Menlo, monospace; border-radius: 4px;
               border: 1px solid \(hex(ReviewColors.border)); background: \(hex(ReviewColors.card)); }
@@ -280,7 +284,8 @@ private struct Renderer {
         var previousEnd = i
         while i < end {
             let start = i
-            let out = block(lines, at: &i, tight: tight, top: top)
+            var out = block(lines, at: &i, tight: tight, top: top)
+            if top { out = Self.taggingLines(out, start..<i, in: lines) }
             guard top, changes != nil, !out.isEmpty else {
                 html += out
                 continue
@@ -292,6 +297,21 @@ private struct Renderer {
             html += removedMarker()
         }
         return html
+    }
+
+    /// The block's first tag marked with the source lines it came from
+    /// (1-based, inclusive), so a selection or a comment can be tied back
+    /// to the Markdown.
+    private static func taggingLines(_ out: String, _ range: Range<Int>, in lines: ArraySlice<String>) -> String {
+        guard out.hasPrefix("<"), let second = out.dropFirst().first, second.isLetter,
+              let nameEnd = out.dropFirst().firstIndex(where: { $0 == " " || $0 == ">" || $0 == "/" })
+        else { return out }
+        var last = range.upperBound
+        // The block's own lines, without the blank ones after it.
+        while last > range.lowerBound + 1, isBlank(lines[last - 1]) { last -= 1 }
+        var tagged = out
+        tagged.insert(contentsOf: " data-kt-line=\"\(range.lowerBound + 1)-\(last)\"", at: nameEnd)
+        return tagged
     }
 
     /// One block starting at `i`, moving `i` past it. Blank lines give "".
