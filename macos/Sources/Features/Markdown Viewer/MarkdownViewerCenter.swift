@@ -269,6 +269,7 @@ final class MarkdownViewerCenter: NSObject, ObservableObject, NSMenuItemValidati
     private func dock(_ model: MarkdownViewerModel, for controller: BaseTerminalController) {
         let id = ObjectIdentifier(controller)
         if docked[id] !== model { docked[id] = model }
+        model.controller = controller
         if inGrid(controller), let window = controller.gridWindow ?? controller.window {
             panels.remove(id)
             if !hasGridTile(of: controller, in: window) {
@@ -370,6 +371,7 @@ final class MarkdownViewerCenter: NSObject, ObservableObject, NSMenuItemValidati
             backing: .buffered,
             defer: false)
         window.isReleasedWhenClosed = false
+        if let controller { model.controller = controller }
         window.appearance = NSAppearance(named: .darkAqua)
         window.minSize = NSSize(width: 480, height: 320)
         window.tabbingMode = .disallowed

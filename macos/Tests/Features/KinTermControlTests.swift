@@ -88,9 +88,18 @@ struct MarkdownRendererTests {
         MarkdownRenderer.page(text, file: URL(fileURLWithPath: "/tmp/x.md"))
     }
 
+    @Test func tagsBlocksWithTheirSourceLines() {
+        let html = render("# Title\n\nOne\ntwo\n\n- a\n- b\n\n\n```\ncode\n```\n")
+        #expect(html.contains("<p data-kt-line=\"3-4\">One\ntwo</p>"))
+        #expect(html.contains("<ul data-kt-line=\"6-7\">"))
+        #expect(html.contains("<pre data-kt-line=\"10-12\">"))
+        let source = MarkdownRenderer.sourcePage("a\nb\n")
+        #expect(source.contains("<tr data-kt-line=\"2-2\">"))
+    }
+
     @Test func rendersTheCommonBlocks() {
         let html = render("# Title\n\n- [x] done\n- todo\n\n| a | b |\n|---|--:|\n| 1 | 2 |\n\n```sh\necho hi\n```\n")
-        #expect(html.contains("<h1 id=\"title\">Title</h1>"))
+        #expect(html.contains("<h1 data-kt-line=\"1-1\" id=\"title\">Title</h1>"))
         #expect(html.contains("<input type=\"checkbox\" checked disabled> done"))
         #expect(html.contains("<th style=\"text-align:right\">b</th>"))
         #expect(html.contains("<code class=\"language-sh\">"))
@@ -136,12 +145,12 @@ struct MarkdownChangesTests {
         let file = URL(fileURLWithPath: "/tmp/plan.md")
         let page = MarkdownRenderer.page(new, file: file, changes: .between(old, new))
         #expect(page.changes == 2)
-        #expect(page.html.contains("<div class=\"kt-change\" id=\"kt-change-0\">\n<p>Intro, rewritten.</p>"))
+        #expect(page.html.contains("<div class=\"kt-change\" id=\"kt-change-0\">\n<p data-kt-line=\"3-3\">Intro, rewritten.</p>"))
         #expect(page.html.contains("<li class=\"kt-change\" id=\"kt-change-1\">two, longer"))
         #expect(page.html.contains("<li>one"))
         #expect(!page.html.contains("kt-change-2"))
         // Unchanged blocks stay as they were.
-        #expect(page.html.contains("<p>End.</p>"))
+        #expect(page.html.contains("<p data-kt-line=\"8-8\">End.</p>"))
     }
 
     @Test func marksWhereTextWasRemoved() {
@@ -157,6 +166,6 @@ struct MarkdownChangesTests {
         let new = "---\ntitle: x\n---\n[a]: https://a.example\n\nSame.\n\nNew.\n"
         let page = MarkdownRenderer.page(new, file: URL(fileURLWithPath: "/tmp/a.md"), changes: .between(old, new))
         #expect(page.changes == 1)
-        #expect(page.html.contains("<div class=\"kt-change\" id=\"kt-change-0\">\n<p>New.</p>"))
+        #expect(page.html.contains("<div class=\"kt-change\" id=\"kt-change-0\">\n<p data-kt-line=\"8-8\">New.</p>"))
     }
 }
